@@ -25,8 +25,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public class ChargeView extends View {
-    private static final int SPARKS = 70, STREAM = 45, SEGS = 120;
-    private static final double WARM_C = 40.0;
+    private static final int SPARKS = 160, DUST = 80, UP = 100;
 
     private final Paint arc = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -53,8 +52,9 @@ public class ChargeView extends View {
 
     private final float[] sa = new float[SPARKS], sr = new float[SPARKS], ss = new float[SPARKS],
         sp = new float[SPARKS], sz = new float[SPARKS];
-    private final float[] px = new float[STREAM], pph = new float[STREAM], pz = new float[STREAM],
-        pw = new float[STREAM];
+    private final float[] da = new float[DUST], dr = new float[DUST], ds = new float[DUST],
+        dp = new float[DUST], dz = new float[DUST];
+    private final float[] ux = new float[UP], uph = new float[UP], uz = new float[UP], uw = new float[UP];
 
     private final Runnable frame = new Runnable() {
         @Override public void run() { invalidate(); postDelayed(this, 33); }
@@ -64,7 +64,7 @@ public class ChargeView extends View {
         super(c);
         setBackgroundColor(Color.BLACK);
         arc.setStyle(Paint.Style.STROKE);
-        arc.setStrokeCap(Paint.Cap.BUTT);
+        arc.setStrokeCap(Paint.Cap.ROUND);
         dot.setStyle(Paint.Style.FILL);
         pill.setStyle(Paint.Style.STROKE);
         pill.setColor(0xCC9CC8FF);
@@ -75,13 +75,20 @@ public class ChargeView extends View {
             sr[i] = (rnd.nextFloat() * 2f - 1f);
             ss[i] = (rnd.nextFloat() * 0.08f + 0.01f) * (rnd.nextBoolean() ? 1 : -1);
             sp[i] = rnd.nextFloat() * 6.28f;
-            sz[i] = 0.6f + rnd.nextFloat() * 1.4f;
+            sz[i] = 0.5f + rnd.nextFloat() * 1.6f;
         }
-        for (int i = 0; i < STREAM; i++) {
-            px[i] = rnd.nextFloat() * 2f - 1f;
-            pph[i] = rnd.nextFloat();
-            pz[i] = 0.6f + rnd.nextFloat() * 1.2f;
-            pw[i] = rnd.nextFloat() * 6.28f;
+        for (int i = 0; i < DUST; i++) {
+            da[i] = (float) (rnd.nextFloat() * Math.PI * 2);
+            dr[i] = (rnd.nextFloat() * 2f - 1f);
+            ds[i] = (rnd.nextFloat() * 0.04f + 0.005f) * (rnd.nextBoolean() ? 1 : -1);
+            dp[i] = rnd.nextFloat() * 6.28f;
+            dz[i] = 0.5f + rnd.nextFloat() * 1.5f;
+        }
+        for (int i = 0; i < UP; i++) {
+            ux[i] = rnd.nextFloat() * 2f - 1f;
+            uph[i] = rnd.nextFloat();
+            uz[i] = 0.6f + rnd.nextFloat() * 1.3f;
+            uw[i] = rnd.nextFloat() * 6.28f;
         }
         try {
             long v = Settings.System.getInt(c.getContentResolver(), Settings.System.SCREEN_OFF_TIMEOUT, 30000);
@@ -93,8 +100,8 @@ public class ChargeView extends View {
         super.onSizeChanged(w, h, ow, oh);
         float cx = w / 2f, cy = h * 0.54f;
         float R = Math.min(w * 0.43f, h * 0.30f);
-        bg.setShader(new RadialGradient(cx, cy, R * 1.6f,
-            new int[]{0x55123C7A, 0x22081C3C, 0x00000000}, new float[]{0f, 0.6f, 1f}, Shader.TileMode.CLAMP));
+        bg.setShader(new RadialGradient(cx, cy, R * 1.7f,
+            new int[]{0x66123C7A, 0x30081C3C, 0x00000000}, new float[]{0f, 0.6f, 1f}, Shader.TileMode.CLAMP));
     }
 
     @Override protected void onAttachedToWindow() {
@@ -143,10 +150,7 @@ public class ChargeView extends View {
         cv.drawText(s, cx - tw / 2f, y, t);
     }
 
-    private int blue(int alpha, float f) {
-        int r = (int) (90 + 165 * f), g = (int) (160 + 95 * f);
-        return Color.argb(Math.max(0, Math.min(255, alpha)), r, g, 255);
-    }
+    private int clamp(int a) { return Math.max(0, Math.min(255, a)); }
 
     private void readExtra() {
         try {
@@ -206,7 +210,7 @@ public class ChargeView extends View {
         float ts = (now - t0) / 1000f;
         Date d = new Date(now);
 
-        cv.drawCircle(cx, cy, R * 1.6f, bg);
+        cv.drawCircle(cx, cy, R * 1.7f, bg);
 
         text(cv, clockFmt.format(d), cx, h * 0.12f, w * 0.14f, thin, 0xFFEDEDED, 0f);
         text(cv, dateFmt.format(d), cx, h * 0.12f + w * 0.085f, w * 0.04f, light, 0xFFB5B5B5, 0.05f);
@@ -219,21 +223,122 @@ public class ChargeView extends View {
 
         arcRect.set(cx - R, cy - R, cx + R, cy + R);
 
+        // Cincin dasar redup
         arc.setStrokeWidth(Math.max(1.5f, w * 0.003f));
         arc.setColor(0x446FA8FF);
         cv.drawArc(arcRect, 0, 360, false, arc);
 
-        int n = Math.max(0, (int) (shown * SEGS));
-        float segDeg = 360f / SEGS;
-        float[] widths = {w * 0.032f, w * 0.016f, w * 0.0065f};
-        int[] alphaMul = {22, 55, 255};
-        for (int pass = 0; pass < 3; pass++) {
-            arc.setStrokeWidth(widths[pass]);
-            for (int k = 0; k < n; k++) {
-                float f = (k + 1f) / Math.max(1, n);
-                float a = 0.10f + 0.90f * f * f;
-                arc.setColor(blue((int) (alphaMul[pass] * a), f));
-                cv.drawArc(arcRect, -90f + k * segDeg, segDeg + 0.8f, false, arc);
+        // Busur level: tebal rata, kedua ujung bulat, 5 lapis cahaya
+        float sweep = 360f * shown;
+        if (sweep > 0.4f) {
+            float[] widths = {w * 0.085f, w * 0.055f, w * 0.034f, w * 0.018f, w * 0.0075f};
+            int[] cols = {0x124A96FF, 0x2A4A96FF, 0x543F8CFF, 0xA078BEFF, 0xFFD7EEFF};
+            for (int pass = 0; pass < 5; pass++) {
+                arc.setStrokeWidth(widths[pass]);
+                arc.setColor(cols[pass]);
+                cv.drawArc(arcRect, -90f, sweep, false, arc);
+            }
+        }
+
+        // Cahaya di ujung depan dan ujung awal
+        double headA = -Math.PI / 2 + 2 * Math.PI * shown;
+        float hx = (float) (cx + R * Math.cos(headA)), hy = (float) (cy + R * Math.sin(headA));
+        float pulse = 0.88f + 0.12f * (float) Math.sin(ts * 4f);
+        if (shown > 0.003f) {
+            dot.setColor(0x104FA3FF); cv.drawCircle(hx, hy, w * 0.07f * pulse, dot);
+            dot.setColor(0x224FA3FF); cv.drawCircle(hx, hy, w * 0.045f * pulse, dot);
+            dot.setColor(0x484FA3FF); cv.drawCircle(hx, hy, w * 0.028f * pulse, dot);
+            dot.setColor(0x90BFDFFF); cv.drawCircle(hx, hy, w * 0.014f, dot);
+            dot.setColor(0xFFFFFFFF); cv.drawCircle(hx, hy, w * 0.006f, dot);
+            float sx = cx, sy = cy - R;
+            dot.setColor(0x184FA3FF); cv.drawCircle(sx, sy, w * 0.04f, dot);
+            dot.setColor(0x404FA3FF); cv.drawCircle(sx, sy, w * 0.022f, dot);
+            dot.setColor(0xB0D7EEFF); cv.drawCircle(sx, sy, w * 0.008f, dot);
+        }
+
+        // Debu halus melayang di sekitar cincin
+        for (int i = 0; i < DUST; i++) {
+            double a = da[i] + ds[i] * ts;
+            float rr = R + dr[i] * w * 0.06f;
+            float x = (float) (cx + rr * Math.cos(a)), y = (float) (cy + rr * Math.sin(a));
+            double ang = (a + Math.PI / 2) % (2 * Math.PI);
+            if (ang < 0) ang += 2 * Math.PI;
+            float inArc = ang <= 2 * Math.PI * shown ? 1f : 0.3f;
+            float tw = 0.5f + 0.5f * (float) Math.sin(ts * 1.5f + dp[i]);
+            dot.setColor(Color.argb(clamp((int) ((14 + 34 * tw) * inArc)), 120, 180, 255));
+            cv.drawCircle(x, y, w * 0.007f * dz[i], dot);
+        }
+
+        // Butiran berkelap-kelip di sekeliling cincin
+        for (int i = 0; i < SPARKS; i++) {
+            double a = sa[i] + ss[i] * ts;
+            float rr = R + sr[i] * w * 0.04f;
+            float x = (float) (cx + rr * Math.cos(a)), y = (float) (cy + rr * Math.sin(a));
+            double ang = (a + Math.PI / 2) % (2 * Math.PI);
+            if (ang < 0) ang += 2 * Math.PI;
+            float inArc = ang <= 2 * Math.PI * shown ? 1f : 0.2f;
+            float tw = 0.5f + 0.5f * (float) Math.sin(ts * 3f + sp[i]);
+            dot.setColor(Color.argb(clamp((int) ((50 + 170 * tw) * inArc)), 190, 225, 255));
+            cv.drawCircle(x, y, w * 0.0025f * sz[i], dot);
+        }
+
+        // Partikel naik dari tengah bawah, menyempit, lalu terhisap ke dasar cincin
+        float yStart = h * 0.99f, yEnd = cy + R;
+        for (int i = 0; i < UP; i++) {
+            float f = (uph[i] + ts * 0.22f) % 1f;
+            float e = (float) Math.pow(f, 1.7);
+            float spread = w * 0.17f * (float) Math.pow(1f - e, 1.2);
+            float x = cx + ux[i] * spread + (float) Math.sin(ts * 2.5f + uw[i]) * (1f - e) * w * 0.01f;
+            float y = yStart + (yEnd - yStart) * e;
+            float fadeIn = Math.min(1f, f * 6f);
+            float fadeOut = 1f - Math.max(0f, (f - 0.8f) / 0.2f);
+            int al = clamp((int) (230 * fadeIn * fadeOut));
+            dot.setColor(Color.argb(al, 150, 205, 255));
+            cv.drawCircle(x, y, w * 0.0032f * uz[i] * (1f - 0.5f * e), dot);
+        }
+
+        // Teks
+        if (!Double.isNaN(tempC)) {
+            text(cv, String.format(new Locale("id", "ID"), "%.1f °C", tempC), cx, cy - R * 0.50f, w * 0.036f, light, 0xFFD0D0D0, 0.1f);
+        }
+        text(cv, info.charging ? "MENGISI DAYA" : "ON BATTERY", cx, cy - R * 0.32f, w * 0.036f, light, 0xFFB5B5B5, 0.28f);
+
+        String whole = info.whole >= 0 ? String.valueOf(info.whole) : "--";
+        String frac = info.hundredths >= 0
+            ? String.format(new Locale("id", "ID"), ",%02d%%", info.hundredths) : "%";
+        float bigSize = w * 0.1265f, smallSize = w * 0.0575f;
+        t.setLetterSpacing(0f);
+        t.setTypeface(thin); t.setTextSize(bigSize);
+        float wBig = t.measureText(whole);
+        t.setTypeface(light); t.setTextSize(smallSize);
+        float wSmall = t.measureText(frac);
+        float x0 = cx - (wBig + wSmall) / 2f;
+        float base = cy + R * 0.06f;
+        t.setTypeface(thin); t.setTextSize(bigSize); t.setColor(0xFFFFFFFF);
+        cv.drawText(whole, x0, base, t);
+        t.setTypeface(light); t.setTextSize(smallSize); t.setColor(0xFFE6E6E6);
+        cv.drawText(frac, x0 + wBig, base, t);
+
+        if (info.charging && !Double.isNaN(info.watts)) {
+            text(cv, String.format(Locale.US, "%.1f W", info.watts), cx, cy + R * 0.34f, w * 0.058f, medium, 0xFF8EC5FF, 0f);
+            text(cv, "MASUK BATERAI", cx, cy + R * 0.50f, w * 0.03f, light, 0xFFB5B5B5, 0.2f);
+            t.setTypeface(medium); t.setTextSize(w * 0.027f); t.setLetterSpacing(0.15f);
+            float tw = t.measureText(info.tier);
+            float pad = w * 0.035f, ph = w * 0.05f, py = cy + R * 0.70f;
+            pill.setStrokeWidth(Math.max(1.5f, w * 0.003f));
+            rect.set(cx - tw / 2 - pad, py - ph / 2, cx + tw / 2 + pad, py + ph / 2);
+            cv.drawRoundRect(rect, ph / 2, ph / 2, pill);
+            t.setColor(0xFFBFDFFF);
+            cv.drawText(info.tier, cx - tw / 2, py + w * 0.01f, t);
+        }
+
+        fitText(cv, info.note, cx, h * 0.925f, w * 0.026f, w * 0.92f, light, 0xFF7A7A7A);
+        String full = fullText();
+        if (full != null) {
+            fitText(cv, full, cx, h * 0.962f, w * 0.036f, w * 0.92f, medium, 0xFFD0D6DC);
+        }
+    }
+        } k * segDeg, segDeg + 0.8f, false, arc);
             }
         }
 
