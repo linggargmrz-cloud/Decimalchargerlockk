@@ -11,7 +11,7 @@ import android.view.WindowManager;
 
 public class ChargeActivity extends Activity {
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
-        @Override public void onReceive(Context c, Intent i) { finish(); }
+        @Override public void onReceive(Context c, Intent i) { finishAndRemoveTask(); }
     };
 
     @Override protected void onCreate(Bundle b) {
@@ -19,9 +19,9 @@ public class ChargeActivity extends Activity {
         setShowWhenLocked(true);
         setTurnScreenOn(true);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        if (!BatteryReader.read(this).charging) { finish(); return; }
+        if (!BatteryReader.read(this).charging) { finishAndRemoveTask(); return; }
         ChargeView v = new ChargeView(this);
-        v.setOnLongClickListener(x -> { finish(); return true; });
+        v.setOnLongClickListener(x -> { finishAndRemoveTask(); return true; });
         setContentView(v);
         hideUi();
         registerReceiver(receiver, new IntentFilter(Intent.ACTION_POWER_DISCONNECTED));
