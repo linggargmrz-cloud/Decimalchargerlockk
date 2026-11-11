@@ -1,8 +1,10 @@
 package id.decimalcharge.lock;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.widget.Button;
@@ -11,35 +13,47 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 public class MainActivity extends Activity {
+    private LinearLayout box;
+
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         getWindow().setStatusBarColor(0xff000000);
         getWindow().setNavigationBarColor(0xff000000);
         ScrollView sv = new ScrollView(this);
         sv.setBackgroundColor(0xff000000);
-        LinearLayout box = new LinearLayout(this);
+        box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(40, 64, 40, 40);
         sv.addView(box);
 
-        TextView title = new TextView(this);
-        title.setText("Decimal Charge Lock"); title.setTextColor(0xffffffff); title.setTextSize(24);
-        TextView info = new TextView(this);
-        info.setText("\nScreensaver pengisian daya dengan persentase desimal.\n\n1. Tekan \"Buka pengaturan Screensaver\".\n2. Pilih Decimal Charge Lock.\n3. Atur mulai saat mengisi daya, dengan waktu tunggu terpendek.\n\nTombol Pratinjau menampilkan layarnya sekarang. Ketuk layar untuk menutup.\n\nCatatan: Android hanya melaporkan level bulat. Desimal dihitung dari charge counter asli baterai dan diberi label estimasi; jika tidak tersedia, yang tampil persentase bulat. Screensaver di MIUI biasanya muncul setelah layar idle.");
-        info.setTextColor(0xffb8c4ca); info.setTextSize(15);
+        label("Decimal Charge Lock", 0xffffffff, 24);
+        label("\nMode otomatis: layar pengisian terbuka sendiri saat charger dicolok. Lakukan langkah 1 sampai 4.", 0xffb8c4ca, 15);
+        button("1. Aktifkan mode otomatis", v -> startForegroundService(new Intent(this, ChargeService.class)));
+        button("2. Izin notifikasi", v -> requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1));
+        button("3. Izin tampil di atas aplikasi lain", v -> startActivity(new Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()))));
+        button("4. Pengaturan aplikasi (MIUI)", v -> startActivity(new Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))));
+        label("\nDi MIUI 14: buka Izin lain, aktifkan \"Tampilkan di layar kunci\" dan \"Tampilkan jendela pop-up saat berjalan di latar belakang\". Aktifkan Autostart, dan Hemat baterai pilih \"Tanpa pembatasan\".", 0xff8a979d, 13);
 
-        Button settings = new Button(this); settings.setText("Buka pengaturan Screensaver");
-        settings.setOnClickListener(v -> {
+        label("\nCadangan: Screensaver", 0xffffffff, 16);
+        button("Buka pengaturan Screensaver", v -> {
             try { startActivity(new Intent(Settings.ACTION_DREAM_SETTINGS)); }
             catch (Exception e) {
-                new AlertDialog.Builder(this).setMessage("Buka Setelan Android lalu cari 'Screensaver' atau 'Screen saver'.")
+                new AlertDialog.Builder(this).setMessage("Buka Setelan Android lalu cari 'Screensaver'.")
                     .setPositiveButton("OK", null).show();
             }
         });
-        Button preview = new Button(this); preview.setText("Pratinjau tampilan");
-        preview.setOnClickListener(v -> startActivity(new Intent(this, PreviewActivity.class)));
-
-        box.addView(title); box.addView(info); box.addView(settings); box.addView(preview);
+        button("Pratinjau tampilan", v -> startActivity(new Intent(this, PreviewActivity.class)));
+        label("\nAndroid hanya melaporkan level bulat. Desimal dihitung dari charge counter asli baterai dan diberi label estimasi; jika tidak tersedia, yang tampil persentase bulat. Tekan lama layar pengisian untuk menutupnya.", 0xff8a979d, 13);
         setContentView(sv);
+    }
+
+    private void label(String t, int color, int sp) {
+        TextView v = new TextView(this); v.setText(t); v.setTextColor(color); v.setTextSize(sp); box.addView(v);
+    }
+
+    private void button(String t, android.view.View.OnClickListener l) {
+        Button bt = new Button(this); bt.setText(t); bt.setOnClickListener(l); box.addView(bt);
     }
 }
