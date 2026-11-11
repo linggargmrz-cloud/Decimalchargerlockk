@@ -106,9 +106,6 @@ public class ChargeView extends View {
             cv.drawText(info.tier, cx - tw / 2, py + w * 0.01f, t);
         }
 
-        String note = info.hundredths >= 0
-            ? (info.exact ? "desimal dari charge counter baterai" : "desimal = estimasi, charge counter / 5000 mAh")
-            : "Android hanya melaporkan persentase bulat";
-        text(cv, note, cx, h * 0.955f, w * 0.026f, light, 0xFF5A5A5A, 0.05f);
+        text(cv, info.note, cx, h * 0.955f, w * 0.026f, light, 0xFF7A7A7A, 0.05f);
     }
-          }
+                          }
