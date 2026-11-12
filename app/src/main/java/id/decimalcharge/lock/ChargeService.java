@@ -22,6 +22,7 @@ import android.provider.Settings;
 public class ChargeService extends Service {
     private static final String CH_STATUS = "status_quiet", CH_ALERT = "alert";
     private static final int ID_FG = 1, ID_ALERT = 2;
+    private static final long MANUAL_OFF_MS = 8000;
 
     private final Handler h = new Handler(Looper.getMainLooper());
     private int tries = 0;
@@ -31,15 +32,14 @@ public class ChargeService extends Service {
         return i != null && i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
     }
 
-    // Menunggu HP benar-benar terkunci setelah layar mati, baru buka layar pengisian.
+    // Menunggu HP benar-benar terkunci setelah layar mati, baru buka layar pengisian (redup).
     private final Runnable waitLock = new Runnable() {
         @Override public void run() {
             PowerManager pm = getSystemService(PowerManager.class);
             KeyguardManager km = getSystemService(KeyguardManager.class);
             if (pm.isInteractive() || !isCharging()) return;
-            if (ChargeActivity.showing
-                || System.currentTimeMillis() - ChargeActivity.lastDestroy < 4000) return;
-            if (km.isKeyguardLocked() || ++tries >= 16) { launch(); return; }
+            if (ChargeActivity.showing) return;
+            if (km.isKeyguardLocked() || ++tries >= 16) { launch(true); return; }
             h.postDelayed(this, 500);
         }
     };
@@ -47,7 +47,24 @@ public class ChargeService extends Service {
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             String a = i.getAction();
-            if (Intent.ACTION_POWER_CONNECTED.equals(a) || Intent.ACTION_SCREEN_OFF.equals(a)) {
+            if (Intent.ACTION_POWER_CONNECTED.equals(a)) {
+                h.removeCallbacks(waitLock);
+                if (getSystemService(PowerManager.class).isInteractive()) {
+                    launch(false);
+                } else {
+                    tries = 0;
+                    h.postDelayed(waitLock, 600);
+                }
+            } else if (Intent.ACTION_SCREEN_OFF.equals(a)) {
+                if (!isCharging()) return;
+                long now = System.currentTimeMillis();
+                boolean was = ChargeActivity.showing || now - ChargeActivity.lastDestroy < 2000;
+                if (was) {
+                    // Layar pengisian redup: layar mati hanya bisa karena tombol power.
+                    if (ChargeActivity.dimMode) return;
+                    // Layar mati cepat setelah sentuhan terakhir: dianggap tombol power.
+                    if (now - ChargeActivity.lastInteraction < MANUAL_OFF_MS) return;
+                }
                 tries = 0;
                 h.removeCallbacks(waitLock);
                 h.postDelayed(waitLock, 600);
@@ -90,11 +107,11 @@ public class ChargeService extends Service {
         registerReceiver(receiver, f);
     }
 
-    private void launch() {
+    private void launch(boolean dim) {
         Intent i = new Intent(this, ChargeActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            .putExtra("dim", true);
-        PendingIntent pi = PendingIntent.getActivity(this, 0, i,
+            .putExtra("dim", dim);
+        PendingIntent pi = PendingIntent.getActivity(this, dim ? 10 : 11, i,
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification n = new Notification.Builder(this, CH_ALERT)
             .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
@@ -125,4 +142,4 @@ public class ChargeService extends Service {
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }
-}
+                    }
