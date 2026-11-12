@@ -1,6 +1,7 @@
 package id.decimalcharge.lock;
 
 import android.app.AlarmManager;
+import android.app.KeyguardManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -10,42 +11,72 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.os.BatteryManager;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
+import android.provider.Settings;
 
 public class ChargeService extends Service {
     private static final String CH_STATUS = "status_quiet", CH_ALERT = "alert";
-    private static final String ACTION_REPOST = "id.decimalcharge.lock.REPOST";
     private static final int ID_FG = 1, ID_ALERT = 2;
 
-    private final BroadcastReceiver power = new BroadcastReceiver() {
+    private final Handler h = new Handler(Looper.getMainLooper());
+    private int tries = 0;
+
+    private boolean isCharging() {
+        Intent i = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        return i != null && i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
+    }
+
+    // Menunggu HP benar-benar terkunci setelah layar mati, baru buka layar pengisian.
+    private final Runnable waitLock = new Runnable() {
+        @Override public void run() {
+            PowerManager pm = getSystemService(PowerManager.class);
+            KeyguardManager km = getSystemService(KeyguardManager.class);
+            if (pm.isInteractive() || !isCharging()) return;
+            if (ChargeActivity.showing
+                || System.currentTimeMillis() - ChargeActivity.lastDestroy < 4000) return;
+            if (km.isKeyguardLocked() || ++tries >= 16) { launch(); return; }
+            h.postDelayed(this, 500);
+        }
+    };
+
+    private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
-            if (Intent.ACTION_POWER_CONNECTED.equals(i.getAction())) launch();
-            else getSystemService(NotificationManager.class).cancel(ID_ALERT);
+            String a = i.getAction();
+            if (Intent.ACTION_POWER_CONNECTED.equals(a) || Intent.ACTION_SCREEN_OFF.equals(a)) {
+                tries = 0;
+                h.removeCallbacks(waitLock);
+                h.postDelayed(waitLock, 600);
+            } else {
+                h.removeCallbacks(waitLock);
+                getSystemService(NotificationManager.class).cancel(ID_ALERT);
+            }
         }
     };
 
     private Notification statusNotification() {
-        PendingIntent open = PendingIntent.getActivity(this, 1, new Intent(this, MainActivity.class),
-            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        PendingIntent del = PendingIntent.getService(this, 2,
-            new Intent(this, ChargeService.class).setAction(ACTION_REPOST),
+        Intent set = new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())
+            .putExtra(Settings.EXTRA_CHANNEL_ID, CH_STATUS);
+        PendingIntent open = PendingIntent.getActivity(this, 1, set,
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, CH_STATUS)
             .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
             .setContentTitle("Decimal Charge Lock aktif")
-            .setContentText("Menunggu charger dicolokkan")
+            .setContentText("Ketuk untuk menyembunyikan notifikasi ini")
             .setOngoing(true)
             .setVisibility(Notification.VISIBILITY_SECRET)
             .setContentIntent(open)
-            .setDeleteIntent(del)
             .build();
     }
 
     @Override public void onCreate() {
         super.onCreate();
         NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.deleteNotificationChannel("status");
         NotificationChannel quiet = new NotificationChannel(CH_STATUS, "Status layanan", NotificationManager.IMPORTANCE_MIN);
         quiet.setLockscreenVisibility(Notification.VISIBILITY_SECRET);
         quiet.setShowBadge(false);
@@ -55,12 +86,14 @@ public class ChargeService extends Service {
         IntentFilter f = new IntentFilter();
         f.addAction(Intent.ACTION_POWER_CONNECTED);
         f.addAction(Intent.ACTION_POWER_DISCONNECTED);
-        registerReceiver(power, f);
+        f.addAction(Intent.ACTION_SCREEN_OFF);
+        registerReceiver(receiver, f);
     }
 
     private void launch() {
         Intent i = new Intent(this, ChargeActivity.class)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra("dim", true);
         PendingIntent pi = PendingIntent.getActivity(this, 0, i,
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification n = new Notification.Builder(this, CH_ALERT)
@@ -72,12 +105,7 @@ public class ChargeService extends Service {
         try { startActivity(i); } catch (Exception ignored) { }
     }
 
-    @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_REPOST.equals(intent.getAction())) {
-            try { startForeground(ID_FG, statusNotification()); } catch (Exception ignored) { }
-        }
-        return START_STICKY;
-    }
+    @Override public int onStartCommand(Intent intent, int flags, int startId) { return START_STICKY; }
 
     @Override public void onTaskRemoved(Intent rootIntent) {
         try {
@@ -91,7 +119,8 @@ public class ChargeService extends Service {
     }
 
     @Override public void onDestroy() {
-        try { unregisterReceiver(power); } catch (Exception ignored) { }
+        h.removeCallbacks(waitLock);
+        try { unregisterReceiver(receiver); } catch (Exception ignored) { }
         super.onDestroy();
     }
 
