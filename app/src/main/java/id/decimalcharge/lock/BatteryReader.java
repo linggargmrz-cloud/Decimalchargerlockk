@@ -59,6 +59,11 @@ final class BatteryReader {
             if (!r.charging) {
                 anchorLevel = -1;
                 r.note = "desimal hanya dihitung saat mengisi daya";
+            } else if (lv >= 100) {
+                anchorLevel = -1;
+                r.whole = 100;
+                r.hundredths = -1;
+                r.note = "baterai penuh";
             } else if (counter <= 0) {
                 anchorLevel = -1;
                 r.note = "charge counter tidak tersedia di HP ini";
@@ -88,6 +93,7 @@ final class BatteryReader {
                         double p = anchorLevel + 100.0 * (counter - anchorCounter) / full;
                         if (p < anchorLevel) p = anchorLevel;
                         if (p > anchorLevel + 0.99) p = anchorLevel + 0.99;
+                        if (p > 99.99) p = 99.99;
                         int h = (int) Math.floor(p * 100.0 + 1e-6);
                         r.whole = h / 100;
                         r.hundredths = h % 100;
@@ -128,4 +134,4 @@ final class BatteryReader {
             return Long.parseLong(br.readLine().trim());
         } catch (Throwable t) { return -1; }
     }
-                        }
+                    }
