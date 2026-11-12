@@ -13,7 +13,9 @@ import android.view.WindowManager;
 
 public class ChargeActivity extends Activity {
     static volatile boolean showing = false;
+    static volatile boolean dimMode = false;
     static volatile long lastDestroy = 0;
+    static volatile long lastInteraction = 0;
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) { finishAndRemoveTask(); }
@@ -28,27 +30,42 @@ public class ChargeActivity extends Activity {
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         showing = true;
+        lastInteraction = System.currentTimeMillis();
+        boolean dim = getIntent().getBooleanExtra("dim", false);
+        dimMode = dim;
         setShowWhenLocked(true);
         setTurnScreenOn(true);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (dim) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (!BatteryReader.read(this).charging) { finishAndRemoveTask(); return; }
         try { getSystemService(NotificationManager.class).cancel(2); } catch (Exception ignored) { }
         ChargeView v = new ChargeView(this);
         v.setOnLongClickListener(x -> { finishAndRemoveTask(); return true; });
         v.setOnTouchListener((x, e) -> {
-            if (e.getAction() == MotionEvent.ACTION_DOWN) setDim(false);
+            if (e.getAction() == MotionEvent.ACTION_DOWN && dimMode) setDim(false);
             return false;
         });
         setContentView(v);
-        if (getIntent().getBooleanExtra("dim", false)) setDim(true);
+        if (dim) setDim(true);
         hideUi();
-        registerReceiver(receiver, new IntentFilter(Intent.ACTION_POWER_DISCONNECTED));
+        IntentFilter f = new IntentFilter();
+        f.addAction(Intent.ACTION_POWER_DISCONNECTED);
+        f.addAction(Intent.ACTION_SCREEN_OFF);
+        registerReceiver(receiver, f);
+    }
+
+    @Override public void onUserInteraction() {
+        super.onUserInteraction();
+        lastInteraction = System.currentTimeMillis();
     }
 
     @Override protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
         setIntent(i);
-        if (i.getBooleanExtra("dim", false)) setDim(true);
+        if (i.getBooleanExtra("dim", false)) {
+            dimMode = true;
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            setDim(true);
+        }
     }
 
     private void hideUi() {
@@ -66,4 +83,4 @@ public class ChargeActivity extends Activity {
         try { unregisterReceiver(receiver); } catch (Exception ignored) { }
         super.onDestroy();
     }
-}
+            }
