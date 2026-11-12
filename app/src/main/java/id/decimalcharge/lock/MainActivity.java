@@ -6,10 +6,12 @@ import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -24,9 +26,13 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final int GREEN = 0xFF2ECC71, RED = 0xFFE74C3C, GRAY = 0xFF7D8890;
+    private static final int GREEN = 0xFF2ECC71, RED = 0xFFE74C3C, GRAY = 0xFF7D8890, YELLOW = 0xFFF1C40F;
+    private static final double DESIGN_MAH = 5000.0;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable ticker = new Runnable() {
@@ -39,6 +45,7 @@ public class MainActivity extends Activity {
     private Switch toggle;
     private CompoundButton.OnCheckedChangeListener toggleListener;
     private Row rowNotif, rowOverlay, rowBattery;
+    private TextView hStatus, hTemp, hVolt, hTech, hCycle, hDesign, hCap, hHealth, hHint;
     private int notifAsked = 0;
 
     private static class Row { TextView chip; Button btn; }
@@ -115,6 +122,22 @@ public class MainActivity extends Activity {
         }));
         root.addView(look);
 
+        // Kartu kesehatan baterai (hanya di dalam aplikasi)
+        LinearLayout health = card();
+        health.addView(text("KESEHATAN BATERAI", 0xff9aa5ab, 11, true));
+        hStatus = kv(health, "Status sistem");
+        hTemp = kv(health, "Suhu");
+        hVolt = kv(health, "Tegangan");
+        hTech = kv(health, "Teknologi");
+        hCycle = kv(health, "Siklus pengisian");
+        hDesign = kv(health, "Kapasitas desain");
+        hCap = kv(health, "Estimasi kapasitas saat ini");
+        hHealth = kv(health, "Estimasi kesehatan");
+        hHint = text("", 0xff8a979d, 11, false);
+        hHint.setPadding(0, dp(10), 0, 0);
+        health.addView(hHint);
+        root.addView(health);
+
         TextView foot = text("Android hanya melaporkan level baterai bulat. Desimal dihitung dari charge counter asli baterai dan diberi label estimasi. Tekan lama layar pengisian untuk menutupnya.", 0xff59646a, 11, false);
         foot.setPadding(dp(4), dp(10), dp(4), 0);
         root.addView(foot);
@@ -143,6 +166,66 @@ public class MainActivity extends Activity {
         state(rowOverlay, Settings.canDrawOverlays(this));
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         state(rowBattery, pm != null && pm.isIgnoringBatteryOptimizations(getPackageName()));
+
+        refreshHealth();
+    }
+
+    private void refreshHealth() {
+        try {
+            Intent bi = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (bi != null) {
+                int hs = bi.getIntExtra(BatteryManager.EXTRA_HEALTH, BatteryManager.BATTERY_HEALTH_UNKNOWN);
+                String s; int col = 0xFFFFFFFF;
+                switch (hs) {
+                    case BatteryManager.BATTERY_HEALTH_GOOD: s = "Baik"; col = GREEN; break;
+                    case BatteryManager.BATTERY_HEALTH_OVERHEAT: s = "Terlalu panas"; col = RED; break;
+                    case BatteryManager.BATTERY_HEALTH_DEAD: s = "Rusak"; col = RED; break;
+                    case BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE: s = "Tegangan berlebih"; col = RED; break;
+                    case BatteryManager.BATTERY_HEALTH_COLD: s = "Terlalu dingin"; col = YELLOW; break;
+                    case BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE: s = "Gangguan"; col = RED; break;
+                    default: s = "Tidak diketahui"; col = GRAY;
+                }
+                hStatus.setText(s); hStatus.setTextColor(col);
+                int tm = bi.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+                hTemp.setText(tm == Integer.MIN_VALUE ? "Tidak tersedia"
+                    : String.format(new Locale("id", "ID"), "%.1f °C", tm / 10.0));
+                int mv = bi.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
+                hVolt.setText(mv > 0 ? String.format(new Locale("id", "ID"), "%.2f V", mv / 1000.0) : "Tidak tersedia");
+                String tech = bi.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY);
+                hTech.setText(tech == null || tech.isEmpty() ? "Tidak tersedia" : tech);
+
+                int cycles = -1;
+                if (Build.VERSION.SDK_INT >= 34) cycles = bi.getIntExtra(BatteryManager.EXTRA_CYCLE_COUNT, -1);
+                if (cycles < 0) cycles = (int) readLong("/sys/class/power_supply/battery/cycle_count");
+                hCycle.setText(cycles >= 0 ? String.valueOf(cycles) : "Tidak tersedia di HP ini");
+            }
+        } catch (Throwable ignored) { }
+
+        double designMah = DESIGN_MAH;
+        long sysDesign = readLong("/sys/class/power_supply/battery/charge_full_design");
+        boolean designExact = sysDesign > 1000000;
+        if (designExact) designMah = sysDesign / 1000.0;
+        hDesign.setText(String.format(Locale.US, "%.0f mAh%s", designMah, designExact ? "" : " (spesifikasi)"));
+
+        double learned = 0;
+        long sysFull = readLong("/sys/class/power_supply/battery/charge_full");
+        boolean exact = sysFull > 1000000;
+        if (exact) learned = sysFull / 1000.0;
+        else learned = getSharedPreferences("cal", MODE_PRIVATE).getFloat("full", 0f) / 1000.0;
+
+        if (learned > 500) {
+            hCap.setText(String.format(Locale.US, "%.0f mAh%s", learned, exact ? "" : " (estimasi)"));
+            double pct = Math.min(100.0, learned / designMah * 100.0);
+            hHealth.setText(String.format(Locale.US, "%.0f%%%s", pct, exact ? "" : " (estimasi kasar)"));
+            hHealth.setTextColor(pct >= 80 ? GREEN : pct >= 60 ? YELLOW : RED);
+            hHint.setText(exact ? "Kapasitas dibaca dari sistem."
+                : "Estimasi dari kalibrasi charge counter, bisa meleset 10% atau lebih. Jangan dipakai untuk memutuskan ganti baterai.");
+        } else {
+            hCap.setText("Belum ada data");
+            hHealth.setText("Belum ada data");
+            hHealth.setTextColor(GRAY);
+            hHint.setText("Colokkan charger dan biarkan layar pengisian terbuka sampai level naik 1%. Estimasi muncul setelah itu.");
+        }
     }
 
     @SuppressWarnings("deprecation")
@@ -154,6 +237,12 @@ public class MainActivity extends Activity {
             }
         } catch (Throwable ignored) { }
         return false;
+    }
+
+    private static long readLong(String path) {
+        try (BufferedReader br = new BufferedReader(new FileReader(path))) {
+            return Long.parseLong(br.readLine().trim());
+        } catch (Throwable t) { return -1; }
     }
 
     private void askNotif() {
@@ -189,6 +278,19 @@ public class MainActivity extends Activity {
         TextView v = new TextView(this);
         v.setText(s); v.setTextColor(color); v.setTextSize(sp);
         if (bold) v.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        return v;
+    }
+
+    private TextView kv(LinearLayout parent, String label) {
+        LinearLayout line = new LinearLayout(this);
+        line.setOrientation(LinearLayout.HORIZONTAL);
+        line.setPadding(0, dp(10), 0, 0);
+        TextView l = text(label, 0xFF9AA5AB, 13, false);
+        line.addView(l, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView v = text("-", 0xFFFFFFFF, 13, true);
+        v.setGravity(Gravity.END);
+        line.addView(v);
+        parent.addView(line);
         return v;
     }
 
@@ -246,4 +348,4 @@ public class MainActivity extends Activity {
         chip(r.chip, ok ? "Aktif" : "Belum", ok ? GREEN : RED);
         r.btn.setVisibility(ok ? View.GONE : View.VISIBLE);
     }
-                                          }
+    }
