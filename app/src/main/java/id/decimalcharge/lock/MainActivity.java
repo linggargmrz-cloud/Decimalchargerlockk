@@ -4,6 +4,8 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -18,14 +20,19 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CompoundButton;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.util.Locale;
@@ -44,8 +51,11 @@ public class MainActivity extends Activity {
     private TextView statusTitle, statusSub;
     private Switch toggle;
     private CompoundButton.OnCheckedChangeListener toggleListener;
-    private Row rowNotif, rowOverlay, rowBattery;
+    private Row rowNotif, rowOverlay, rowBattery, rowDns;
     private TextView hStatus, hTemp, hVolt, hTech, hCycle, hDesign, hCap, hHealth, hHint;
+    private TextView dnsMode;
+    private Switch bubbleSwitch;
+    private CompoundButton.OnCheckedChangeListener bubbleListener;
     private int notifAsked = 0;
 
     private static class Row { TextView chip; Button btn; }
@@ -122,6 +132,64 @@ public class MainActivity extends Activity {
         }));
         root.addView(look);
 
+        // Kartu DNS pribadi (bubble)
+        LinearLayout dns = card();
+        dns.addView(text("DNS PRIBADI (BUBBLE)", 0xff9aa5ab, 11, true));
+        dnsMode = text("", 0xFFFFFFFF, 14, true);
+        dnsMode.setPadding(0, dp(10), 0, 0);
+        dns.addView(dnsMode);
+
+        EditText et = new EditText(this);
+        et.setHint("Hostname DNS, contoh: dns.google");
+        et.setHintTextColor(0xFF59646A);
+        et.setTextColor(0xFFFFFFFF);
+        et.setTextSize(14);
+        et.setSingleLine(true);
+        et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        et.setBackground(box(0xFF1B2227, 0xFF2C353C, 10));
+        et.setPadding(dp(12), dp(10), dp(12), dp(10));
+        et.setText(DnsHelper.host(this));
+        et.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int cn, int af) { }
+            @Override public void onTextChanged(CharSequence s, int st, int bf, int cn) { }
+            @Override public void afterTextChanged(Editable s) { DnsHelper.saveHost(MainActivity.this, s.toString()); }
+        });
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        elp.topMargin = dp(10);
+        et.setLayoutParams(elp);
+        dns.addView(et);
+
+        LinearLayout bl = new LinearLayout(this);
+        bl.setOrientation(LinearLayout.HORIZONTAL);
+        bl.setGravity(Gravity.CENTER_VERTICAL);
+        bl.setPadding(0, dp(14), 0, 0);
+        bl.addView(text("Tampilkan bubble DNS", 0xFFFFFFFF, 15, true),
+            new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        bubbleSwitch = new Switch(this);
+        bl.addView(bubbleSwitch);
+        dns.addView(bl);
+        TextView hintDns = text("Ketuk bubble: ON = DNS pribadi (hostname di atas), ketuk lagi = DNS Otomatis. Geser untuk memindahkan.", 0xff8a979d, 12, false);
+        hintDns.setPadding(0, dp(6), 0, 0);
+        dns.addView(hintDns);
+
+        bubbleListener = (v, on) -> {
+            if (on) {
+                if (!Settings.canDrawOverlays(this)) {
+                    open(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
+                    handler.postDelayed(this::refresh, 500);
+                    return;
+                }
+                startForegroundService(new Intent(this, DnsBubbleService.class));
+            } else {
+                stopService(new Intent(this, DnsBubbleService.class));
+            }
+            handler.postDelayed(this::refresh, 600);
+        };
+
+        rowDns = row(dns, "Izin ubah DNS", "Diberikan sekali lewat ADB. Salin perintahnya, lalu jalankan lewat Shizuku, LADB, atau komputer.", "Salin perintah ADB", v -> copyAdb());
+        root.addView(dns);
+
         // Kartu kesehatan baterai (hanya di dalam aplikasi)
         LinearLayout health = card();
         health.addView(text("KESEHATAN BATERAI", 0xff9aa5ab, 11, true));
@@ -167,7 +235,32 @@ public class MainActivity extends Activity {
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         state(rowBattery, pm != null && pm.isIgnoringBatteryOptimizations(getPackageName()));
 
+        refreshDns();
         refreshHealth();
+    }
+
+    private void refreshDns() {
+        bubbleSwitch.setOnCheckedChangeListener(null);
+        bubbleSwitch.setChecked(DnsBubbleService.running);
+        bubbleSwitch.setOnCheckedChangeListener(bubbleListener);
+        String m = DnsHelper.mode(this);
+        String s;
+        if ("hostname".equals(m)) {
+            String sp = DnsHelper.spec(this);
+            s = "Mode DNS saat ini: Pribadi" + (sp.isEmpty() ? "" : " (" + sp + ")");
+        } else if ("off".equals(m)) {
+            s = "Mode DNS saat ini: Mati";
+        } else {
+            s = "Mode DNS saat ini: Otomatis";
+        }
+        dnsMode.setText(s);
+        state(rowDns, DnsHelper.canWrite(this));
+    }
+
+    private void copyAdb() {
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        cm.setPrimaryClip(ClipData.newPlainText("adb", DnsHelper.ADB_CMD));
+        Toast.makeText(this, "Perintah disalin", Toast.LENGTH_SHORT).show();
     }
 
     private void refreshHealth() {
@@ -348,4 +441,4 @@ public class MainActivity extends Activity {
         chip(r.chip, ok ? "Aktif" : "Belum", ok ? GREEN : RED);
         r.btn.setVisibility(ok ? View.GONE : View.VISIBLE);
     }
-    }
+                }
