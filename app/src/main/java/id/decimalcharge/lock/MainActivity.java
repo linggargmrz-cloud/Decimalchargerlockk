@@ -37,6 +37,11 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.FileReader;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
@@ -59,6 +64,16 @@ public class MainActivity extends Activity {
     private Switch bubbleSwitch, quotaSwitch;
     private CompoundButton.OnCheckedChangeListener bubbleListener, quotaListener;
     private int notifAsked = 0;
+
+    // Riwayat suhu
+    private TempChartView chart;
+    private TextView tTemp, tLegend, tStats, tRises;
+    private final Button[] periodBtns = new Button[3];
+    private int period = 0;
+    private int lastRev = -1, lastPeriod = -1;
+    private long lastTempLoad = 0;
+    private final SimpleDateFormat fmtHm = new SimpleDateFormat("HH.mm", new Locale("id", "ID"));
+    private final SimpleDateFormat fmtDm = new SimpleDateFormat("d MMM HH.mm", new Locale("id", "ID"));
 
     private static class Row { TextView chip; Button btn; }
 
@@ -232,6 +247,71 @@ public class MainActivity extends Activity {
         quota.addView(qn);
         root.addView(quota);
 
+        // Kartu riwayat suhu baterai
+        LinearLayout temp = card();
+        temp.addView(text("RIWAYAT SUHU BATERAI", 0xff9aa5ab, 11, true));
+        tTemp = text("", 0xFFFFFFFF, 22, true);
+        tTemp.setPadding(0, dp(10), 0, 0);
+        temp.addView(tTemp);
+
+        LinearLayout pr = new LinearLayout(this);
+        pr.setOrientation(LinearLayout.HORIZONTAL);
+        pr.setPadding(0, dp(10), 0, 0);
+        String[] names = {"Hari ini", "24 jam", "7 hari"};
+        period = prefs.getInt("tperiod", 0);
+        for (int k = 0; k < 3; k++) {
+            final int kk = k;
+            Button pb = new Button(this);
+            pb.setText(names[k]);
+            pb.setAllCaps(false);
+            pb.setTextSize(12);
+            pb.setOnClickListener(v -> {
+                period = kk;
+                prefs.edit().putInt("tperiod", kk).apply();
+                styleTabs();
+                loadTemp(true);
+            });
+            LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(0, dp(38), 1f);
+            plp.rightMargin = k < 2 ? dp(6) : 0;
+            pr.addView(pb, plp);
+            periodBtns[k] = pb;
+        }
+        temp.addView(pr);
+        styleTabs();
+
+        chart = new TempChartView(this);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(210));
+        clp.topMargin = dp(10);
+        temp.addView(chart, clp);
+
+        tLegend = text("", 0xFF9AA5AB, 11, false);
+        tLegend.setText(Html.fromHtml("<font color='#F28B82'>&#9679; Suhu (&deg;C)</font> &nbsp;&nbsp; <font color='#4DA3FF'>&#9679; Baterai (%)</font> &nbsp;&nbsp; Sentuh grafik untuk detail", Html.FROM_HTML_MODE_LEGACY));
+        tLegend.setPadding(0, dp(6), 0, 0);
+        temp.addView(tLegend);
+
+        tStats = text("", 0xFFDDE3E7, 12, false);
+        tStats.setPadding(0, dp(12), 0, 0);
+        temp.addView(tStats);
+
+        TextView riseTitle = text("Kenaikan suhu (naik 0,5 °C atau lebih)", 0xFFFFFFFF, 13, true);
+        riseTitle.setPadding(0, dp(12), 0, 0);
+        temp.addView(riseTitle);
+        tRises = text("", 0xFFB8C4CA, 12, false);
+        tRises.setPadding(0, dp(4), 0, 0);
+        temp.addView(tRises);
+
+        temp.addView(btn("Hapus riwayat suhu", v ->
+            new AlertDialog.Builder(this)
+                .setMessage("Hapus semua riwayat suhu baterai?")
+                .setPositiveButton("Hapus", (d, w) -> { TempLog.clear(this); loadTemp(true); })
+                .setNegativeButton("Batal", null)
+                .show()));
+        TextView tn = text("Dicatat saat Mode Otomatis aktif, disimpan di HP selama 7 hari. Suhu dari sensor baterai, bisa berbeda dari suhu prosesor.", 0xff8a979d, 11, false);
+        tn.setPadding(0, dp(10), 0, 0);
+        temp.addView(tn);
+        root.addView(temp);
+
         // Kartu kesehatan baterai (hanya di dalam aplikasi)
         LinearLayout health = card();
         health.addView(text("KESEHATAN BATERAI", 0xff9aa5ab, 11, true));
@@ -320,6 +400,7 @@ public class MainActivity extends Activity {
 
         refreshDns();
         refreshQuota();
+        refreshTemp();
         refreshHealth();
     }
 
@@ -352,6 +433,103 @@ public class MainActivity extends Activity {
                 + "   Wi-Fi: " + QuotaHelper.fmt(QuotaHelper.wifiToday(this)));
         } else {
             quotaText.setText("Aktifkan izin Akses penggunaan dulu");
+        }
+    }
+
+    private String f1(double v) { return String.format(new Locale("id", "ID"), "%.1f", v); }
+
+    private void styleTabs() {
+        for (int k = 0; k < 3; k++) {
+            boolean sel = k == period;
+            periodBtns[k].setBackground(sel ? box(0xFF2B4A6F, 0xFF4DA3FF, 10) : box(0xFF1B2227, 0xFF2C353C, 10));
+            periodBtns[k].setTextColor(sel ? 0xFFFFFFFF : 0xFF9AA5AB);
+        }
+    }
+
+    private void refreshTemp() {
+        try {
+            Intent bi = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (bi != null) {
+                int tm = bi.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+                int lv = bi.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int sc = bi.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
+                String a = tm == Integer.MIN_VALUE ? "-" : f1(tm / 10.0) + " °C";
+                String bt = (lv >= 0 && sc > 0) ? Math.round(100f * lv / sc) + "%" : "-";
+                tTemp.setText(a + "   " + bt);
+                double tv = tm == Integer.MIN_VALUE ? 0 : tm / 10.0;
+                tTemp.setTextColor(tv >= 42 ? RED : tv >= 38 ? YELLOW : 0xFFFFFFFF);
+            }
+        } catch (Throwable ignored) { }
+        loadTemp(false);
+    }
+
+    private void loadTemp(boolean force) {
+        int rev = TempLog.rev;
+        long now = System.currentTimeMillis();
+        if (!force && rev == lastRev && period == lastPeriod && now - lastTempLoad < 60000) return;
+        lastRev = rev;
+        lastPeriod = period;
+        lastTempLoad = now;
+
+        long from, to;
+        if (period == 0) {
+            Calendar cal = Calendar.getInstance();
+            cal.set(Calendar.HOUR_OF_DAY, 0);
+            cal.set(Calendar.MINUTE, 0);
+            cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0);
+            from = cal.getTimeInMillis();
+            to = from + 86400000L;
+        } else if (period == 1) {
+            to = now;
+            from = now - 86400000L;
+        } else {
+            to = now;
+            from = now - 7L * 86400000L;
+        }
+        List<TempLog.Sample> list = TempLog.load(this, from);
+        chart.setData(list, from, to);
+
+        SimpleDateFormat tf = period == 2 ? fmtDm : fmtHm;
+        double mx = -1e9, mn = 1e9, sum = 0;
+        int cnt = 0;
+        TempLog.Sample smx = null, smn = null;
+        double base = Double.NaN;
+        List<String> ev = new ArrayList<>();
+        for (TempLog.Sample s : list) {
+            if (s.t > to) continue;
+            double v = s.temp / 10.0;
+            cnt++;
+            sum += v;
+            if (v > mx) { mx = v; smx = s; }
+            if (v < mn) { mn = v; smn = s; }
+            if (Double.isNaN(base)) { base = v; continue; }
+            if (v >= base + 0.5) {
+                ev.add(tf.format(new Date(s.t)) + "   naik ke " + f1(v) + " °C (+" + f1(v - base)
+                    + ")   baterai " + s.level + "%" + (s.chg ? "   mengisi" : ""));
+                base = v;
+            } else if (v <= base - 0.5) {
+                base = v;
+            }
+        }
+        if (cnt == 0 || smx == null || smn == null) {
+            tStats.setText("Belum ada data. Pastikan Mode Otomatis aktif, lalu tunggu beberapa menit.");
+            tRises.setText("-");
+            return;
+        }
+        tStats.setText("Tertinggi " + f1(mx) + " °C (" + tf.format(new Date(smx.t)) + ", baterai " + smx.level + "%)\n"
+            + "Terendah " + f1(mn) + " °C (" + tf.format(new Date(smn.t)) + ", baterai " + smn.level + "%)\n"
+            + "Rata-rata " + f1(sum / cnt) + " °C dari " + cnt + " catatan");
+        if (ev.isEmpty()) {
+            tRises.setText("Belum ada kenaikan 0,5 °C atau lebih pada periode ini.");
+        } else {
+            StringBuilder sb = new StringBuilder();
+            int shown = 0;
+            for (int k = ev.size() - 1; k >= 0 && shown < 10; k--, shown++) {
+                if (shown > 0) sb.append("\n");
+                sb.append(ev.get(k));
+            }
+            tRises.setText(sb.toString());
         }
     }
 
@@ -548,4 +726,4 @@ public class MainActivity extends Activity {
         chip(r.chip, ok ? "Aktif" : "Belum", ok ? GREEN : RED);
         r.btn.setVisibility(ok ? View.GONE : View.VISIBLE);
     }
-                }
+    }
