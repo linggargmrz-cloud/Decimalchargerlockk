@@ -44,6 +44,13 @@ final class BatteryReader {
         int voltageMv = i.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
         r.charging = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
         if (level < 0 || scale <= 0) return r;
+
+        // Catat riwayat suhu dan persen baterai (hanya jika ada perubahan).
+        try {
+            int tmp = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+            TempLog.record(c, Math.round(100f * level / scale), tmp, r.charging);
+        } catch (Throwable ignored) { }
+
         double base = 100.0 * level / scale;
         r.whole = (int) Math.round(base);
         int lv = r.whole;
@@ -134,4 +141,4 @@ final class BatteryReader {
             return Long.parseLong(br.readLine().trim());
         } catch (Throwable t) { return -1; }
     }
-                    }
+                }
