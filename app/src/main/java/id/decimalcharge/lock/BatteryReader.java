@@ -45,12 +45,6 @@ final class BatteryReader {
         r.charging = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
         if (level < 0 || scale <= 0) return r;
 
-        // Catat riwayat suhu dan persen baterai (hanya jika ada perubahan).
-        try {
-            int tmp = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
-            TempLog.record(c, Math.round(100f * level / scale), tmp, r.charging);
-        } catch (Throwable ignored) { }
-
         double base = 100.0 * level / scale;
         r.whole = (int) Math.round(base);
         int lv = r.whole;
@@ -120,6 +114,13 @@ final class BatteryReader {
             r.note = "gagal membaca data baterai";
         }
 
+        // Catat riwayat: baterai dalam persepuluh persen (0,1%), suhu, dan status charger.
+        try {
+            int tmp = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+            int l10 = r.hundredths >= 0 ? r.whole * 10 + r.hundredths / 10 : r.whole * 10;
+            TempLog.record(c, l10, tmp, r.charging);
+        } catch (Throwable ignored) { }
+
         lastLevel = lv;
         lastTime = now;
         double w = Double.isNaN(r.watts) ? 0 : r.watts;
@@ -141,4 +142,4 @@ final class BatteryReader {
             return Long.parseLong(br.readLine().trim());
         } catch (Throwable t) { return -1; }
     }
-                }
+                            }
