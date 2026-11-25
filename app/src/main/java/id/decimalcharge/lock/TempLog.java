@@ -7,15 +7,16 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 final class TempLog {
     static final class Sample {
         final long t;
-        final int level;
-        final int temp;
+        final int level10;   // persen baterai dalam persepuluh (823 = 82,3%)
+        final int temp;      // suhu dalam persepuluh derajat (352 = 35,2 C)
         final boolean chg;
-        Sample(long t, int level, int temp, boolean chg) {
-            this.t = t; this.level = level; this.temp = temp; this.chg = chg;
+        Sample(long t, int level10, int temp, boolean chg) {
+            this.t = t; this.level10 = level10; this.temp = temp; this.chg = chg;
         }
     }
 
@@ -31,17 +32,22 @@ final class TempLog {
     }
 
     private static String line(Sample s) {
-        return s.t + "," + s.level + "," + s.temp + "," + (s.chg ? "1" : "0") + "\n";
+        return s.t + "," + Math.round(s.level10 / 10f) + "," + s.temp + "," + (s.chg ? "1" : "0") + "," + s.level10 + "\n";
     }
 
     private static Sample parse(String ln) {
         try {
             String[] p = ln.split(",");
             if (p.length < 4) return null;
-            return new Sample(Long.parseLong(p[0]), Integer.parseInt(p[1]), Integer.parseInt(p[2]), "1".equals(p[3]));
+            int l10 = p.length >= 5 ? Integer.parseInt(p[4]) : Integer.parseInt(p[1]) * 10;
+            return new Sample(Long.parseLong(p[0]), l10, Integer.parseInt(p[2]), "1".equals(p[3]));
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    static String pct(int level10) {
+        return String.format(new Locale("id", "ID"), "%.1f%%", level10 / 10.0);
     }
 
     private static void ensure(Context c) {
@@ -59,19 +65,18 @@ final class TempLog {
         } catch (Throwable ignored) { }
     }
 
-    // Suhu dalam persepuluh derajat (352 = 35,2 C). Dicatat setiap suhu, level, atau status charger berubah,
-    // atau sudah 5 menit sejak catatan terakhir.
-    static synchronized void record(Context c, int level, int temp, boolean charging) {
-        if (temp == Integer.MIN_VALUE || temp < -300 || temp > 1000 || level < 0) return;
+    // Dicatat setiap suhu, level (0,1%), atau status charger berubah, atau 5 menit sejak catatan terakhir.
+    static synchronized void record(Context c, int level10, int temp, boolean charging) {
+        if (temp == Integer.MIN_VALUE || temp < -300 || temp > 1000 || level10 < 0 || level10 > 1000) return;
         ensure(c);
         long now = System.currentTimeMillis();
         Sample last = cache.isEmpty() ? null : cache.get(cache.size() - 1);
         if (last != null) {
             if (now <= last.t) return;
-            boolean changed = temp != last.temp || level != last.level || charging != last.chg;
+            boolean changed = temp != last.temp || level10 != last.level10 || charging != last.chg;
             if (!changed && now - last.t < KEEPALIVE_MS) return;
         }
-        Sample s = new Sample(now, level, temp, charging);
+        Sample s = new Sample(now, level10, temp, charging);
         try (FileWriter w = new FileWriter(file(c), true)) {
             w.write(line(s));
         } catch (Throwable t) {
@@ -107,4 +112,4 @@ final class TempLog {
         file(c).delete();
         rev++;
     }
-            }
+                    }
