@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.provider.Settings;
 
 public class BootReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context c, Intent i) {
@@ -13,6 +14,9 @@ public class BootReceiver extends BroadcastReceiver {
         }
         if (sp.getBoolean("quota", false)) {
             try { c.startForegroundService(new Intent(c, QuotaService.class)); } catch (Exception ignored) { }
+        }
+        if (sp.getBoolean("bubble", false) && Settings.canDrawOverlays(c)) {
+            try { c.startForegroundService(new Intent(c, DnsBubbleService.class)); } catch (Exception ignored) { }
         }
     }
 }
