@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -39,7 +40,6 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -47,6 +47,7 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private static final int GREEN = 0xFF2ECC71, RED = 0xFFE74C3C, GRAY = 0xFF7D8890, YELLOW = 0xFFF1C40F;
     private static final double DESIGN_MAH = 5000.0;
+    private static final long[] SPANS = {3600000L, 21600000L, 86400000L, 604800000L};
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable ticker = new Runnable() {
@@ -67,11 +68,9 @@ public class MainActivity extends Activity {
 
     // Riwayat suhu
     private TempChartView chart;
-    private TextView tTemp, tLegend, tStats, tRises;
-    private final Button[] periodBtns = new Button[3];
-    private int period = 0;
-    private int lastRev = -1, lastPeriod = -1;
-    private long lastTempLoad = 0;
+    private TextView tTemp, tLegend, tStats, tTrend, tRises;
+    private final Button[] periodBtns = new Button[4];
+    private int period = 1;
     private final SimpleDateFormat fmtHm = new SimpleDateFormat("HH.mm", new Locale("id", "ID"));
     private final SimpleDateFormat fmtDm = new SimpleDateFormat("d MMM HH.mm", new Locale("id", "ID"));
 
@@ -90,8 +89,15 @@ public class MainActivity extends Activity {
         root.setPadding(dp(18), dp(36), dp(18), dp(28));
         sv.addView(root);
 
+        String ver = "";
+        try {
+            PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            long code = Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : pi.versionCode;
+            ver = "Versi " + pi.versionName + " (build " + code + ")";
+        } catch (Throwable ignored) { }
+
         TextView title = text("Decimal Charge Lock", 0xffffffff, 24, true);
-        TextView sub = text("Layar pengisian dengan persen desimal", 0xff8a979d, 13, false);
+        TextView sub = text("Layar pengisian dengan persen desimal" + (ver.isEmpty() ? "" : "\n" + ver), 0xff8a979d, 13, false);
         sub.setPadding(0, dp(2), 0, dp(16));
         root.addView(title);
         root.addView(sub);
@@ -198,8 +204,10 @@ public class MainActivity extends Activity {
                     handler.postDelayed(this::refresh, 500);
                     return;
                 }
+                prefs.edit().putBoolean("bubble", true).apply();
                 startForegroundService(new Intent(this, DnsBubbleService.class));
             } else {
+                prefs.edit().putBoolean("bubble", false).apply();
                 stopService(new Intent(this, DnsBubbleService.class));
             }
             handler.postDelayed(this::refresh, 600);
@@ -257,22 +265,24 @@ public class MainActivity extends Activity {
         LinearLayout pr = new LinearLayout(this);
         pr.setOrientation(LinearLayout.HORIZONTAL);
         pr.setPadding(0, dp(10), 0, 0);
-        String[] names = {"Hari ini", "24 jam", "7 hari"};
-        period = prefs.getInt("tperiod", 0);
-        for (int k = 0; k < 3; k++) {
+        String[] names = {"1 jam", "6 jam", "24 jam", "7 hari"};
+        period = prefs.getInt("tperiod2", 1);
+        if (period < 0 || period > 3) period = 1;
+        for (int k = 0; k < 4; k++) {
             final int kk = k;
             Button pb = new Button(this);
             pb.setText(names[k]);
             pb.setAllCaps(false);
             pb.setTextSize(12);
+            pb.setPadding(0, 0, 0, 0);
             pb.setOnClickListener(v -> {
                 period = kk;
-                prefs.edit().putInt("tperiod", kk).apply();
+                prefs.edit().putInt("tperiod2", kk).apply();
                 styleTabs();
-                loadTemp(true);
+                loadTemp();
             });
             LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(0, dp(38), 1f);
-            plp.rightMargin = k < 2 ? dp(6) : 0;
+            plp.rightMargin = k < 3 ? dp(6) : 0;
             pr.addView(pb, plp);
             periodBtns[k] = pb;
         }
@@ -281,17 +291,24 @@ public class MainActivity extends Activity {
 
         chart = new TempChartView(this);
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(210));
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(240));
         clp.topMargin = dp(10);
         temp.addView(chart, clp);
 
         tLegend = text("", 0xFF9AA5AB, 11, false);
-        tLegend.setText(Html.fromHtml("<font color='#F28B82'>&#9679; Suhu (&deg;C)</font> &nbsp;&nbsp; <font color='#4DA3FF'>&#9679; Baterai (%)</font> &nbsp;&nbsp; Sentuh grafik untuk detail", Html.FROM_HTML_MODE_LEGACY));
+        tLegend.setText(Html.fromHtml("<font color='#4CD08A'>&#9679; Suhu di bawah 40 &deg;C</font> &nbsp; <font color='#FF5A5A'>&#9679; 40 &deg;C ke atas</font> &nbsp; <font color='#4DA3FF'>&#9679; Baterai (%)</font>", Html.FROM_HTML_MODE_LEGACY));
         tLegend.setPadding(0, dp(6), 0, 0);
         temp.addView(tLegend);
+        TextView tap = text("Sentuh dan geser jari di grafik untuk detail.", 0xFF59646A, 11, false);
+        tap.setPadding(0, dp(2), 0, 0);
+        temp.addView(tap);
+
+        tTrend = text("", 0xFFFFFFFF, 13, true);
+        tTrend.setPadding(0, dp(12), 0, 0);
+        temp.addView(tTrend);
 
         tStats = text("", 0xFFDDE3E7, 12, false);
-        tStats.setPadding(0, dp(12), 0, 0);
+        tStats.setPadding(0, dp(8), 0, 0);
         temp.addView(tStats);
 
         TextView riseTitle = text("Kenaikan suhu (naik 0,5 °C atau lebih)", 0xFFFFFFFF, 13, true);
@@ -304,10 +321,10 @@ public class MainActivity extends Activity {
         temp.addView(btn("Hapus riwayat suhu", v ->
             new AlertDialog.Builder(this)
                 .setMessage("Hapus semua riwayat suhu baterai?")
-                .setPositiveButton("Hapus", (d, w) -> { TempLog.clear(this); loadTemp(true); })
+                .setPositiveButton("Hapus", (d, w) -> { TempLog.clear(this); loadTemp(); })
                 .setNegativeButton("Batal", null)
                 .show()));
-        TextView tn = text("Dicatat saat Mode Otomatis aktif, disimpan di HP selama 7 hari. Suhu dari sensor baterai, bisa berbeda dari suhu prosesor.", 0xff8a979d, 11, false);
+        TextView tn = text("Dicatat otomatis selama Mode Otomatis aktif (setiap suhu berubah 0,1 °C atau baterai berubah 1%), disimpan di HP selama 7 hari. Suhu dari sensor baterai, bisa berbeda dari suhu prosesor.", 0xff8a979d, 11, false);
         tn.setPadding(0, dp(10), 0, 0);
         temp.addView(tn);
         root.addView(temp);
@@ -328,7 +345,7 @@ public class MainActivity extends Activity {
         health.addView(hHint);
         root.addView(health);
 
-        TextView foot = text("Android hanya melaporkan level baterai bulat. Desimal dihitung dari charge counter asli baterai dan diberi label estimasi. Tekan lama layar pengisian untuk menutupnya.", 0xff59646a, 11, false);
+        TextView foot = text("Android hanya melaporkan level baterai bulat. Desimal dihitung dari charge counter asli baterai dan diberi label estimasi. Tekan lama layar pengisian untuk menutupnya. Pengaturan dan riwayat tersimpan di HP dan tidak hilang saat aplikasi diperbarui, selama aplikasinya tidak dihapus.", 0xff59646a, 11, false);
         foot.setPadding(dp(4), dp(10), dp(4), 0);
         root.addView(foot);
 
@@ -439,7 +456,7 @@ public class MainActivity extends Activity {
     private String f1(double v) { return String.format(new Locale("id", "ID"), "%.1f", v); }
 
     private void styleTabs() {
-        for (int k = 0; k < 3; k++) {
+        for (int k = 0; k < 4; k++) {
             boolean sel = k == period;
             periodBtns[k].setBackground(sel ? box(0xFF2B4A6F, 0xFF4DA3FF, 10) : box(0xFF1B2227, 0xFF2C353C, 10));
             periodBtns[k].setTextColor(sel ? 0xFFFFFFFF : 0xFF9AA5AB);
@@ -457,47 +474,25 @@ public class MainActivity extends Activity {
                 String bt = (lv >= 0 && sc > 0) ? Math.round(100f * lv / sc) + "%" : "-";
                 tTemp.setText(a + "   " + bt);
                 double tv = tm == Integer.MIN_VALUE ? 0 : tm / 10.0;
-                tTemp.setTextColor(tv >= 42 ? RED : tv >= 38 ? YELLOW : 0xFFFFFFFF);
+                tTemp.setTextColor(tv >= 40.0 ? RED : GREEN);
             }
         } catch (Throwable ignored) { }
-        loadTemp(false);
+        loadTemp();
     }
 
-    private void loadTemp(boolean force) {
-        int rev = TempLog.rev;
+    private void loadTemp() {
         long now = System.currentTimeMillis();
-        if (!force && rev == lastRev && period == lastPeriod && now - lastTempLoad < 60000) return;
-        lastRev = rev;
-        lastPeriod = period;
-        lastTempLoad = now;
-
-        long from, to;
-        if (period == 0) {
-            Calendar cal = Calendar.getInstance();
-            cal.set(Calendar.HOUR_OF_DAY, 0);
-            cal.set(Calendar.MINUTE, 0);
-            cal.set(Calendar.SECOND, 0);
-            cal.set(Calendar.MILLISECOND, 0);
-            from = cal.getTimeInMillis();
-            to = from + 86400000L;
-        } else if (period == 1) {
-            to = now;
-            from = now - 86400000L;
-        } else {
-            to = now;
-            from = now - 7L * 86400000L;
-        }
+        long from = now - SPANS[period];
         List<TempLog.Sample> list = TempLog.load(this, from);
-        chart.setData(list, from, to);
+        chart.setData(list, from, now);
 
-        SimpleDateFormat tf = period == 2 ? fmtDm : fmtHm;
+        SimpleDateFormat tf = period >= 2 ? fmtDm : fmtHm;
         double mx = -1e9, mn = 1e9, sum = 0;
         int cnt = 0;
         TempLog.Sample smx = null, smn = null;
         double base = Double.NaN;
         List<String> ev = new ArrayList<>();
         for (TempLog.Sample s : list) {
-            if (s.t > to) continue;
             double v = s.temp / 10.0;
             cnt++;
             sum += v;
@@ -513,10 +508,25 @@ public class MainActivity extends Activity {
             }
         }
         if (cnt == 0 || smx == null || smn == null) {
+            tTrend.setText("Tren: belum ada data");
             tStats.setText("Belum ada data. Pastikan Mode Otomatis aktif, lalu tunggu beberapa menit.");
             tRises.setText("-");
             return;
         }
+
+        TempLog.Sample lastS = list.get(list.size() - 1);
+        TempLog.Sample refS = list.get(0);
+        for (TempLog.Sample s : list) {
+            if (s.t <= lastS.t - 600000L) refS = s; else break;
+        }
+        long mins = Math.max(0L, (lastS.t - refS.t) / 60000L);
+        double dT = (lastS.temp - refS.temp) / 10.0;
+        int dL = lastS.level - refS.level;
+        String ts = Math.abs(dT) < 0.05 ? "stabil" : ((dT > 0 ? "naik " : "turun ") + f1(Math.abs(dT)) + " °C");
+        String bs = dL == 0 ? "tetap" : ((dL > 0 ? "naik " : "turun ") + Math.abs(dL) + "%");
+        tTrend.setText(mins < 1 ? "Tren: data masih sedikit"
+            : "Tren " + mins + " menit terakhir: suhu " + ts + ", baterai " + bs);
+
         tStats.setText("Tertinggi " + f1(mx) + " °C (" + tf.format(new Date(smx.t)) + ", baterai " + smx.level + "%)\n"
             + "Terendah " + f1(mn) + " °C (" + tf.format(new Date(smn.t)) + ", baterai " + smn.level + "%)\n"
             + "Rata-rata " + f1(sum / cnt) + " °C dari " + cnt + " catatan");
@@ -726,4 +736,4 @@ public class MainActivity extends Activity {
         chip(r.chip, ok ? "Aktif" : "Belum", ok ? GREEN : RED);
         r.btn.setVisibility(ok ? View.GONE : View.VISIBLE);
     }
-    }
+        }
