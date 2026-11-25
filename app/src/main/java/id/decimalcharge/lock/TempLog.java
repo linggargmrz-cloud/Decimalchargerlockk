@@ -21,17 +21,22 @@ final class TempLog {
 
     static volatile int rev = 0;
     private static final long KEEP_MS = 7L * 24 * 3600 * 1000;
-    private static boolean inited = false;
-    private static int lastTemp = Integer.MIN_VALUE, lastLevel = -1, appended = 0;
-    private static long lastTime = 0;
+    private static final long KEEPALIVE_MS = 300000L;
+    private static final List<Sample> cache = new ArrayList<>();
+    private static boolean loaded = false;
+    private static int appended = 0;
 
     private static File file(Context c) {
         return new File(c.getApplicationContext().getFilesDir(), "templog.csv");
     }
 
-    private static Sample parse(String line) {
+    private static String line(Sample s) {
+        return s.t + "," + s.level + "," + s.temp + "," + (s.chg ? "1" : "0") + "\n";
+    }
+
+    private static Sample parse(String ln) {
         try {
-            String[] p = line.split(",");
+            String[] p = ln.split(",");
             if (p.length < 4) return null;
             return new Sample(Long.parseLong(p[0]), Integer.parseInt(p[1]), Integer.parseInt(p[2]), "1".equals(p[3]));
         } catch (Throwable t) {
@@ -39,68 +44,67 @@ final class TempLog {
         }
     }
 
-    private static List<Sample> readAll(Context c) {
-        List<Sample> out = new ArrayList<>();
+    private static void ensure(Context c) {
+        if (loaded) return;
+        loaded = true;
         File f = file(c);
-        if (!f.exists()) return out;
+        if (!f.exists()) return;
+        long cutoff = System.currentTimeMillis() - KEEP_MS;
         try (BufferedReader br = new BufferedReader(new FileReader(f))) {
             String ln;
             while ((ln = br.readLine()) != null) {
                 Sample s = parse(ln);
-                if (s != null) out.add(s);
+                if (s != null && s.t >= cutoff) cache.add(s);
             }
         } catch (Throwable ignored) { }
-        return out;
     }
 
-    // Suhu dalam persepuluh derajat (352 = 35,2 C). Dicatat hanya jika suhu atau level berubah,
-    // atau sudah lebih dari 10 menit sejak catatan terakhir.
+    // Suhu dalam persepuluh derajat (352 = 35,2 C). Dicatat setiap suhu, level, atau status charger berubah,
+    // atau sudah 5 menit sejak catatan terakhir.
     static synchronized void record(Context c, int level, int temp, boolean charging) {
         if (temp == Integer.MIN_VALUE || temp < -300 || temp > 1000 || level < 0) return;
+        ensure(c);
         long now = System.currentTimeMillis();
-        if (!inited) {
-            inited = true;
-            List<Sample> all = readAll(c);
-            if (!all.isEmpty()) {
-                Sample s = all.get(all.size() - 1);
-                lastTemp = s.temp; lastLevel = s.level; lastTime = s.t;
-            }
+        Sample last = cache.isEmpty() ? null : cache.get(cache.size() - 1);
+        if (last != null) {
+            if (now <= last.t) return;
+            boolean changed = temp != last.temp || level != last.level || charging != last.chg;
+            if (!changed && now - last.t < KEEPALIVE_MS) return;
         }
-        boolean changed = temp != lastTemp || level != lastLevel;
-        if (!changed && now - lastTime < 600000L) return;
+        Sample s = new Sample(now, level, temp, charging);
         try (FileWriter w = new FileWriter(file(c), true)) {
-            w.write(now + "," + level + "," + temp + "," + (charging ? "1" : "0") + "\n");
+            w.write(line(s));
         } catch (Throwable t) {
             return;
         }
-        lastTemp = temp; lastLevel = level; lastTime = now;
+        cache.add(s);
         rev++;
-        if (++appended >= 300) { appended = 0; trim(c, now); }
+        if (++appended >= 500) { appended = 0; trim(c, now); }
     }
 
     private static void trim(Context c, long now) {
-        List<Sample> all = readAll(c);
+        long cutoff = now - KEEP_MS;
+        int k = 0;
+        while (k < cache.size() && cache.get(k).t < cutoff) k++;
+        if (k > 0) cache.subList(0, k).clear();
         try (FileWriter w = new FileWriter(file(c), false)) {
-            for (Sample s : all) {
-                if (now - s.t <= KEEP_MS) {
-                    w.write(s.t + "," + s.level + "," + s.temp + "," + (s.chg ? "1" : "0") + "\n");
-                }
-            }
+            for (Sample s : cache) w.write(line(s));
         } catch (Throwable ignored) { }
     }
 
     static synchronized List<Sample> load(Context c, long fromMs) {
+        ensure(c);
         List<Sample> out = new ArrayList<>();
-        for (Sample s : readAll(c)) {
+        for (Sample s : cache) {
             if (s.t >= fromMs) out.add(s);
         }
         return out;
     }
 
     static synchronized void clear(Context c) {
+        ensure(c);
+        cache.clear();
         file(c).delete();
-        inited = true;
-        lastTemp = Integer.MIN_VALUE; lastLevel = -1; lastTime = 0;
         rev++;
     }
-                              }
+            }
