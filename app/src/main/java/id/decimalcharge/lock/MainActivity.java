@@ -53,11 +53,11 @@ public class MainActivity extends Activity {
     private TextView statusTitle, statusSub;
     private Switch toggle;
     private CompoundButton.OnCheckedChangeListener toggleListener;
-    private Row rowNotif, rowOverlay, rowBattery, rowDns;
+    private Row rowNotif, rowOverlay, rowBattery, rowDns, rowQuota;
     private TextView hStatus, hTemp, hVolt, hTech, hCycle, hDesign, hCap, hHealth, hHint;
-    private TextView dnsMode;
-    private Switch bubbleSwitch;
-    private CompoundButton.OnCheckedChangeListener bubbleListener;
+    private TextView dnsMode, quotaText;
+    private Switch bubbleSwitch, quotaSwitch;
+    private CompoundButton.OnCheckedChangeListener bubbleListener, quotaListener;
     private int notifAsked = 0;
 
     private static class Row { TextView chip; Button btn; }
@@ -193,6 +193,45 @@ public class MainActivity extends Activity {
         rowDns = row(dns, "Izin ubah DNS", "Diberikan sekali lewat ADB. Ikuti panduan di atas, atau salin perintahnya.", "Salin perintah ADB", v -> copyAdb());
         root.addView(dns);
 
+        // Kartu kuota harian
+        LinearLayout quota = card();
+        quota.addView(text("KUOTA HARI INI", 0xff9aa5ab, 11, true));
+        quotaText = text("", 0xFFFFFFFF, 14, true);
+        quotaText.setPadding(0, dp(10), 0, 0);
+        quota.addView(quotaText);
+
+        LinearLayout ql = new LinearLayout(this);
+        ql.setOrientation(LinearLayout.HORIZONTAL);
+        ql.setGravity(Gravity.CENTER_VERTICAL);
+        ql.setPadding(0, dp(14), 0, 0);
+        ql.addView(text("Tampilkan di panel notifikasi", 0xFFFFFFFF, 15, true),
+            new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        quotaSwitch = new Switch(this);
+        ql.addView(quotaSwitch);
+        quota.addView(ql);
+
+        quotaListener = (v, on) -> {
+            if (on) {
+                if (!QuotaHelper.hasAccess(this)) {
+                    openUsageAccess();
+                    handler.postDelayed(this::refresh, 500);
+                    return;
+                }
+                prefs.edit().putBoolean("quota", true).apply();
+                startForegroundService(new Intent(this, QuotaService.class));
+            } else {
+                prefs.edit().putBoolean("quota", false).apply();
+                stopService(new Intent(this, QuotaService.class));
+            }
+            handler.postDelayed(this::refresh, 600);
+        };
+
+        rowQuota = row(quota, "Akses penggunaan", "Izin khusus agar aplikasi bisa membaca pemakaian data.", "Atur", v -> openUsageAccess());
+        TextView qn = text("Angka dihitung oleh HP sejak 00:00 dan bisa berbeda sedikit dari hitungan provider. Data seluler dari semua SIM digabung.", 0xff8a979d, 11, false);
+        qn.setPadding(0, dp(10), 0, 0);
+        quota.addView(qn);
+        root.addView(quota);
+
         // Kartu kesehatan baterai (hanya di dalam aplikasi)
         LinearLayout health = card();
         health.addView(text("KESEHATAN BATERAI", 0xff9aa5ab, 11, true));
@@ -280,6 +319,7 @@ public class MainActivity extends Activity {
         state(rowBattery, pm != null && pm.isIgnoringBatteryOptimizations(getPackageName()));
 
         refreshDns();
+        refreshQuota();
         refreshHealth();
     }
 
@@ -299,6 +339,29 @@ public class MainActivity extends Activity {
         }
         dnsMode.setText(s);
         state(rowDns, DnsHelper.canWrite(this));
+    }
+
+    private void refreshQuota() {
+        quotaSwitch.setOnCheckedChangeListener(null);
+        quotaSwitch.setChecked(QuotaService.running);
+        quotaSwitch.setOnCheckedChangeListener(quotaListener);
+        boolean has = QuotaHelper.hasAccess(this);
+        state(rowQuota, has);
+        if (has) {
+            quotaText.setText("Seluler: " + QuotaHelper.fmt(QuotaHelper.mobileToday(this))
+                + "   Wi-Fi: " + QuotaHelper.fmt(QuotaHelper.wifiToday(this)));
+        } else {
+            quotaText.setText("Aktifkan izin Akses penggunaan dulu");
+        }
+    }
+
+    private void openUsageAccess() {
+        try {
+            startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:" + getPackageName())));
+        } catch (Exception e) {
+            try { startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)); }
+            catch (Exception e2) { openAppInfo(); }
+        }
     }
 
     private void copyAdb() {
@@ -485,4 +548,4 @@ public class MainActivity extends Activity {
         chip(r.chip, ok ? "Aktif" : "Belum", ok ? GREEN : RED);
         r.btn.setVisibility(ok ? View.GONE : View.VISIBLE);
     }
-            }
+                }
