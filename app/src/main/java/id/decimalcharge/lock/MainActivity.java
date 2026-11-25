@@ -24,13 +24,17 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.Html;
 import android.text.InputType;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextWatcher;
 import android.text.method.LinkMovementMethod;
+import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
@@ -46,6 +50,8 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final int GREEN = 0xFF2ECC71, RED = 0xFFE74C3C, GRAY = 0xFF7D8890, YELLOW = 0xFFF1C40F;
+    private static final int ICE = 0xFF7FDBFF, FIRE = 0xFFFF4D3D;
+    private static final int B_GREEN = 0xFF3DDC84, B_ORANGE = 0xFFFFA726, B_BLUE = 0xFF3D8BFF;
     private static final double DESIGN_MAH = 5000.0;
     private static final long[] SPANS = {3600000L, 21600000L, 86400000L, 604800000L};
 
@@ -55,24 +61,37 @@ public class MainActivity extends Activity {
     };
 
     private SharedPreferences prefs;
+    private final Locale idl = new Locale("id", "ID");
+
+    // Struktur halaman
+    private TwoPager pager;
+    private FrameLayout tabs;
+    private View indicator;
+    private TextView tabDecimal, tabDns;
+
+    // Ruang Decimal
     private LinearLayout statusCard;
     private TextView statusTitle, statusSub;
     private Switch toggle;
     private CompoundButton.OnCheckedChangeListener toggleListener;
-    private Row rowNotif, rowOverlay, rowBattery, rowDns, rowQuota;
+    private Row rowNotif, rowOverlay, rowBattery;
     private TextView hStatus, hTemp, hVolt, hTech, hCycle, hDesign, hCap, hHealth, hHint;
-    private TextView dnsMode, quotaText;
-    private Switch bubbleSwitch, quotaSwitch;
-    private CompoundButton.OnCheckedChangeListener bubbleListener, quotaListener;
-    private int notifAsked = 0;
-
-    // Riwayat suhu
     private TempChartView chart;
     private TextView tTemp, tLegend, tStats, tTrend, tRises;
     private final Button[] periodBtns = new Button[4];
     private int period = 1;
+    private int lastRev = -1, lastPeriod = -1;
+    private long lastLoad = 0;
     private final SimpleDateFormat fmtHm = new SimpleDateFormat("HH.mm", new Locale("id", "ID"));
     private final SimpleDateFormat fmtDm = new SimpleDateFormat("d MMM HH.mm", new Locale("id", "ID"));
+
+    // Ruang DNS
+    private LinearLayout dnsHero;
+    private TextView dnsMode, dnsSub, quotaText;
+    private Row rowDns, rowQuota;
+    private Switch bubbleSwitch, quotaSwitch;
+    private CompoundButton.OnCheckedChangeListener bubbleListener, quotaListener;
+    private int notifAsked = 0;
 
     private static class Row { TextView chip; Button btn; }
 
@@ -82,43 +101,135 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(0xff000000);
         prefs = getSharedPreferences("app", MODE_PRIVATE);
 
-        ScrollView sv = new ScrollView(this);
-        sv.setBackgroundColor(0xff000000);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(36), dp(18), dp(28));
-        sv.addView(root);
+        LinearLayout main = new LinearLayout(this);
+        main.setOrientation(LinearLayout.VERTICAL);
+        main.setBackgroundColor(0xff000000);
 
+        // Judul dan versi
         String ver = "";
         try {
             PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
             long code = Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : pi.versionCode;
             ver = "Versi " + pi.versionName + " (build " + code + ")";
         } catch (Throwable ignored) { }
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.VERTICAL);
+        head.setPadding(dp(22), dp(34), dp(22), dp(12));
+        head.addView(text("Decimal Charge Lock", 0xffffffff, 22, true));
+        head.addView(text(ver.isEmpty() ? "Persen baterai desimal" : ver, 0xff7d8890, 12, false));
+        main.addView(head);
 
-        TextView title = text("Decimal Charge Lock", 0xffffffff, 24, true);
-        TextView sub = text("Layar pengisian dengan persen desimal" + (ver.isEmpty() ? "" : "\n" + ver), 0xff8a979d, 13, false);
-        sub.setPadding(0, dp(2), 0, dp(16));
-        root.addView(title);
-        root.addView(sub);
+        // Tab: Decimal | DNS
+        tabs = new FrameLayout(this);
+        tabs.setBackground(box(0xFF101418, 0xFF1C2227, 24));
+        indicator = new View(this);
+        indicator.setBackground(box(0xFF1C3350, 0xFF3D8BFF, 20));
+        FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(10), FrameLayout.LayoutParams.MATCH_PARENT);
+        ilp.setMargins(0, dp(4), 0, dp(4));
+        tabs.addView(indicator, ilp);
+        LinearLayout tabRow = new LinearLayout(this);
+        tabRow.setOrientation(LinearLayout.HORIZONTAL);
+        tabDecimal = tab("Decimal", 0);
+        tabDns = tab("DNS", 1);
+        tabRow.addView(tabDecimal, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        tabRow.addView(tabDns, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        tabs.addView(tabRow, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        tlp.setMargins(dp(18), 0, dp(18), dp(8));
+        main.addView(tabs, tlp);
 
-        // Kartu status mode otomatis
+        // Dua ruang
+        pager = new TwoPager(this);
+        ScrollView sv0 = pageScroll();
+        LinearLayout col0 = column();
+        sv0.addView(col0);
+        ScrollView sv1 = pageScroll();
+        LinearLayout col1 = column();
+        sv1.addView(col1);
+        pager.addView(sv0, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        pager.addView(sv1, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        main.addView(pager, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        buildDecimalRoom(col0);
+        buildDnsRoom(col1);
+
+        pager.setListener(new TwoPager.Listener() {
+            @Override public void onScroll(float pos) { updateIndicator(pos); }
+            @Override public void onSelected(int page) { prefs.edit().putInt("page", page).apply(); }
+        });
+        tabs.addOnLayoutChangeListener((v, l, tp, r, bt, ol, ot, orr, ob) -> updateIndicator(pager.getPos()));
+        pager.setPage(prefs.getInt("page", 0) == 1 ? 1 : 0, false);
+
+        setContentView(main);
+    }
+
+    @Override public void onBackPressed() {
+        if (pager != null && pager.getPage() == 1) pager.setPage(0, true);
+        else super.onBackPressed();
+    }
+
+    private TextView tab(String label, final int idx) {
+        TextView t = text(label, 0xFF7D8890, 14, true);
+        t.setGravity(Gravity.CENTER);
+        t.setOnClickListener(v -> pager.setPage(idx, true));
+        return t;
+    }
+
+    private void updateIndicator(float pos) {
+        if (tabs == null || indicator == null || tabDecimal == null) return;
+        int w = tabs.getWidth();
+        if (w <= 0) return;
+        int iw = (w - dp(8)) / 2;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) indicator.getLayoutParams();
+        if (lp.width != iw) {
+            lp.width = iw;
+            indicator.setLayoutParams(lp);
+        }
+        indicator.setTranslationX(dp(4) + pos * iw);
+        tabDecimal.setTextColor(pos < 0.5f ? 0xFFFFFFFF : 0xFF7D8890);
+        tabDns.setTextColor(pos >= 0.5f ? 0xFFFFFFFF : 0xFF7D8890);
+    }
+
+    private ScrollView pageScroll() {
+        ScrollView sv = new ScrollView(this);
+        sv.setBackgroundColor(0xff000000);
+        sv.setVerticalScrollBarEnabled(false);
+        return sv;
+    }
+
+    private LinearLayout column() {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.VERTICAL);
+        l.setPadding(dp(18), dp(6), dp(18), dp(32));
+        return l;
+    }
+
+    // ===================== RUANG DECIMAL =====================
+    private void buildDecimalRoom(LinearLayout root) {
+        // Kartu utama: aktifkan mode otomatis
         statusCard = card();
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout tx = new LinearLayout(this);
         tx.setOrientation(LinearLayout.VERTICAL);
-        statusTitle = text("", 0xffffffff, 20, true);
+        statusTitle = text("", 0xffffffff, 22, true);
         statusSub = text("", 0xffb8c4ca, 13, false);
-        tx.addView(text("MODE OTOMATIS", 0xff9aa5ab, 11, true));
+        tx.addView(text("LAYAR DECIMAL", 0xff9aa5ab, 11, true));
         tx.addView(statusTitle);
         tx.addView(statusSub);
         top.addView(tx, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         toggle = new Switch(this);
         top.addView(toggle);
         statusCard.addView(top);
-        statusCard.addView(text("Layar pengisian terbuka sendiri saat charger dicolok.", 0xff8a979d, 12, false));
+        TextView hint = text("Layar pengisian dengan persen desimal terbuka sendiri saat charger dicolok.", 0xff8a979d, 12, false);
+        hint.setPadding(0, dp(8), 0, 0);
+        statusCard.addView(hint);
         root.addView(statusCard);
 
         toggleListener = (v, on) -> {
@@ -128,7 +239,7 @@ public class MainActivity extends Activity {
             handler.postDelayed(this::refresh, 500);
         };
 
-        // Kartu izin
+        // Izin
         LinearLayout perm = card();
         perm.addView(text("IZIN", 0xff9aa5ab, 11, true));
         rowNotif = row(perm, "Notifikasi", "Dibutuhkan agar layanan tampil dan berjalan stabil.", "Atur", v -> askNotif());
@@ -142,7 +253,7 @@ public class MainActivity extends Activity {
         chip(miui.chip, "Cek manual", GRAY);
         root.addView(perm);
 
-        // Kartu tampilan
+        // Tampilan
         LinearLayout look = card();
         look.addView(text("TAMPILAN", 0xff9aa5ab, 11, true));
         look.addView(btn("Pratinjau tampilan", v -> startActivity(new Intent(this, PreviewActivity.class))));
@@ -155,13 +266,146 @@ public class MainActivity extends Activity {
         }));
         root.addView(look);
 
-        // Kartu DNS pribadi (bubble)
-        LinearLayout dns = card();
-        dns.addView(text("DNS PRIBADI (BUBBLE)", 0xff9aa5ab, 11, true));
-        dnsMode = text("", 0xFFFFFFFF, 14, true);
-        dnsMode.setPadding(0, dp(10), 0, 0);
-        dns.addView(dnsMode);
+        // Riwayat suhu dan baterai
+        LinearLayout temp = card();
+        temp.addView(text("RIWAYAT SUHU DAN BATERAI", 0xff9aa5ab, 11, true));
+        tTemp = text("", 0xFFFFFFFF, 24, true);
+        tTemp.setPadding(0, dp(10), 0, 0);
+        temp.addView(tTemp);
 
+        LinearLayout pr = new LinearLayout(this);
+        pr.setOrientation(LinearLayout.HORIZONTAL);
+        pr.setPadding(0, dp(10), 0, 0);
+        String[] names = {"1 jam", "6 jam", "24 jam", "7 hari"};
+        period = prefs.getInt("tperiod2", 1);
+        if (period < 0 || period > 3) period = 1;
+        for (int k = 0; k < 4; k++) {
+            final int kk = k;
+            Button pb = new Button(this);
+            pb.setText(names[k]);
+            pb.setAllCaps(false);
+            pb.setTextSize(12);
+            pb.setPadding(0, 0, 0, 0);
+            pb.setOnClickListener(v -> {
+                period = kk;
+                prefs.edit().putInt("tperiod2", kk).apply();
+                styleTabs();
+                loadTemp(true);
+            });
+            LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(0, dp(38), 1f);
+            plp.rightMargin = k < 3 ? dp(6) : 0;
+            pr.addView(pb, plp);
+            periodBtns[k] = pb;
+        }
+        temp.addView(pr);
+        styleTabs();
+
+        chart = new TempChartView(this);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(250));
+        clp.topMargin = dp(10);
+        temp.addView(chart, clp);
+
+        tLegend = text("", 0xFF9AA5AB, 11, false);
+        tLegend.setText(Html.fromHtml(
+            "<font color='#7FDBFF'>&#9679; Suhu di bawah 45 &deg;C</font> &nbsp; <font color='#FF4D3D'>&#9679; Suhu 45 &deg;C ke atas</font><br>"
+            + "<font color='#3DDC84'>&#9679; Baterai mengisi</font> &nbsp; <font color='#3D8BFF'>&#9679; Baterai normal</font> &nbsp; <font color='#FFA726'>&#9679; Baterai di bawah 20%</font>",
+            Html.FROM_HTML_MODE_LEGACY));
+        tLegend.setPadding(0, dp(6), 0, 0);
+        temp.addView(tLegend);
+        TextView tap = text("Sentuh dan geser jari di grafik untuk detail. Sumbu kiri: suhu, sumbu kanan: baterai.", 0xFF59646A, 11, false);
+        tap.setPadding(0, dp(2), 0, 0);
+        temp.addView(tap);
+
+        tTrend = text("", 0xFFFFFFFF, 13, true);
+        tTrend.setPadding(0, dp(12), 0, 0);
+        temp.addView(tTrend);
+
+        tStats = text("", 0xFFDDE3E7, 12, false);
+        tStats.setPadding(0, dp(8), 0, 0);
+        temp.addView(tStats);
+
+        TextView riseTitle = text("Kenaikan suhu (naik 0,5 °C atau lebih)", 0xFFFFFFFF, 13, true);
+        riseTitle.setPadding(0, dp(12), 0, 0);
+        temp.addView(riseTitle);
+        tRises = text("", 0xFFB8C4CA, 12, false);
+        tRises.setPadding(0, dp(4), 0, 0);
+        temp.addView(tRises);
+
+        temp.addView(btn("Hapus riwayat", v ->
+            new AlertDialog.Builder(this)
+                .setMessage("Hapus semua riwayat suhu dan baterai?")
+                .setPositiveButton("Hapus", (d, w) -> { TempLog.clear(this); loadTemp(true); })
+                .setNegativeButton("Batal", null)
+                .show()));
+        TextView tn = text("Dicatat otomatis selama Layar Decimal aktif: saat dicas baterai dicatat per 0,1%, saat tidak dicas per 1%. Suhu dicatat tiap berubah 0,1 °C. Disimpan di HP selama 7 hari. Suhu dari sensor baterai, bisa berbeda dari suhu prosesor.", 0xff8a979d, 11, false);
+        tn.setPadding(0, dp(10), 0, 0);
+        temp.addView(tn);
+        root.addView(temp);
+
+        // Kesehatan baterai
+        LinearLayout health = card();
+        health.addView(text("KESEHATAN BATERAI", 0xff9aa5ab, 11, true));
+        hStatus = kv(health, "Status sistem");
+        hTemp = kv(health, "Suhu");
+        hVolt = kv(health, "Tegangan");
+        hTech = kv(health, "Teknologi");
+        hCycle = kv(health, "Siklus pengisian");
+        hDesign = kv(health, "Kapasitas desain");
+        hCap = kv(health, "Estimasi kapasitas saat ini");
+        hHealth = kv(health, "Estimasi kesehatan");
+        hHint = text("", 0xff8a979d, 11, false);
+        hHint.setPadding(0, dp(10), 0, 0);
+        health.addView(hHint);
+        root.addView(health);
+
+        TextView foot = text("Android hanya melaporkan level baterai bulat. Desimal dihitung dari charge counter asli baterai dan diberi label estimasi. Tekan lama layar pengisian untuk menutupnya. Pengaturan dan riwayat tersimpan di HP dan tidak hilang saat aplikasi diperbarui, selama aplikasinya tidak dihapus.", 0xff59646a, 11, false);
+        foot.setPadding(dp(4), dp(6), dp(4), 0);
+        root.addView(foot);
+    }
+
+    // ===================== RUANG DNS =====================
+    private void buildDnsRoom(LinearLayout root) {
+        // Kartu utama: bubble DNS
+        dnsHero = card();
+        LinearLayout dtop = new LinearLayout(this);
+        dtop.setOrientation(LinearLayout.HORIZONTAL);
+        dtop.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout dtx = new LinearLayout(this);
+        dtx.setOrientation(LinearLayout.VERTICAL);
+        dtx.addView(text("BUBBLE DNS", 0xff9aa5ab, 11, true));
+        dnsMode = text("", 0xFFFFFFFF, 22, true);
+        dtx.addView(dnsMode);
+        dnsSub = text("", 0xFFB8C4CA, 13, false);
+        dtx.addView(dnsSub);
+        dtop.addView(dtx, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        bubbleSwitch = new Switch(this);
+        dtop.addView(bubbleSwitch);
+        dnsHero.addView(dtop);
+        TextView dh = text("Nyalakan saklar untuk menampilkan bubble di atas semua aplikasi. Ketuk bubble: ON = DNS pribadi (hostname di bawah), ketuk lagi = DNS Otomatis. Geser bubble untuk memindahkan.", 0xff8a979d, 12, false);
+        dh.setPadding(0, dp(8), 0, 0);
+        dnsHero.addView(dh);
+        root.addView(dnsHero);
+
+        bubbleListener = (v, on) -> {
+            if (on) {
+                if (!Settings.canDrawOverlays(this)) {
+                    open(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
+                    handler.postDelayed(this::refresh, 500);
+                    return;
+                }
+                prefs.edit().putBoolean("bubble", true).apply();
+                startForegroundService(new Intent(this, DnsBubbleService.class));
+            } else {
+                prefs.edit().putBoolean("bubble", false).apply();
+                stopService(new Intent(this, DnsBubbleService.class));
+            }
+            handler.postDelayed(this::refresh, 600);
+        };
+
+        // Pengaturan DNS
+        LinearLayout dns = card();
+        dns.addView(text("PENGATURAN DNS", 0xff9aa5ab, 11, true));
         EditText et = new EditText(this);
         et.setHint("Hostname DNS, contoh: dns.google");
         et.setHintTextColor(0xFF59646A);
@@ -182,44 +426,14 @@ public class MainActivity extends Activity {
         elp.topMargin = dp(10);
         et.setLayoutParams(elp);
         dns.addView(et);
-
-        LinearLayout bl = new LinearLayout(this);
-        bl.setOrientation(LinearLayout.HORIZONTAL);
-        bl.setGravity(Gravity.CENTER_VERTICAL);
-        bl.setPadding(0, dp(14), 0, 0);
-        bl.addView(text("Tampilkan bubble DNS", 0xFFFFFFFF, 15, true),
-            new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        bubbleSwitch = new Switch(this);
-        bl.addView(bubbleSwitch);
-        dns.addView(bl);
-        TextView hintDns = text("Ketuk bubble: ON = DNS pribadi (hostname di atas), ketuk lagi = DNS Otomatis. Geser untuk memindahkan.", 0xff8a979d, 12, false);
-        hintDns.setPadding(0, dp(6), 0, 0);
-        dns.addView(hintDns);
+        rowDns = row(dns, "Izin ubah DNS", "Diberikan sekali lewat ADB. Ikuti panduan di bawah, atau salin perintahnya.", "Salin perintah ADB", v -> copyAdb());
         dns.addView(btn("Panduan memasang izin DNS (lengkap)", v -> showDnsGuide()));
-
-        bubbleListener = (v, on) -> {
-            if (on) {
-                if (!Settings.canDrawOverlays(this)) {
-                    open(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
-                    handler.postDelayed(this::refresh, 500);
-                    return;
-                }
-                prefs.edit().putBoolean("bubble", true).apply();
-                startForegroundService(new Intent(this, DnsBubbleService.class));
-            } else {
-                prefs.edit().putBoolean("bubble", false).apply();
-                stopService(new Intent(this, DnsBubbleService.class));
-            }
-            handler.postDelayed(this::refresh, 600);
-        };
-
-        rowDns = row(dns, "Izin ubah DNS", "Diberikan sekali lewat ADB. Ikuti panduan di atas, atau salin perintahnya.", "Salin perintah ADB", v -> copyAdb());
         root.addView(dns);
 
-        // Kartu kuota harian
+        // Kuota harian
         LinearLayout quota = card();
         quota.addView(text("KUOTA HARI INI", 0xff9aa5ab, 11, true));
-        quotaText = text("", 0xFFFFFFFF, 14, true);
+        quotaText = text("", 0xFFFFFFFF, 16, true);
         quotaText.setPadding(0, dp(10), 0, 0);
         quota.addView(quotaText);
 
@@ -254,102 +468,6 @@ public class MainActivity extends Activity {
         qn.setPadding(0, dp(10), 0, 0);
         quota.addView(qn);
         root.addView(quota);
-
-        // Kartu riwayat suhu baterai
-        LinearLayout temp = card();
-        temp.addView(text("RIWAYAT SUHU BATERAI", 0xff9aa5ab, 11, true));
-        tTemp = text("", 0xFFFFFFFF, 22, true);
-        tTemp.setPadding(0, dp(10), 0, 0);
-        temp.addView(tTemp);
-
-        LinearLayout pr = new LinearLayout(this);
-        pr.setOrientation(LinearLayout.HORIZONTAL);
-        pr.setPadding(0, dp(10), 0, 0);
-        String[] names = {"1 jam", "6 jam", "24 jam", "7 hari"};
-        period = prefs.getInt("tperiod2", 1);
-        if (period < 0 || period > 3) period = 1;
-        for (int k = 0; k < 4; k++) {
-            final int kk = k;
-            Button pb = new Button(this);
-            pb.setText(names[k]);
-            pb.setAllCaps(false);
-            pb.setTextSize(12);
-            pb.setPadding(0, 0, 0, 0);
-            pb.setOnClickListener(v -> {
-                period = kk;
-                prefs.edit().putInt("tperiod2", kk).apply();
-                styleTabs();
-                loadTemp();
-            });
-            LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(0, dp(38), 1f);
-            plp.rightMargin = k < 3 ? dp(6) : 0;
-            pr.addView(pb, plp);
-            periodBtns[k] = pb;
-        }
-        temp.addView(pr);
-        styleTabs();
-
-        chart = new TempChartView(this);
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(240));
-        clp.topMargin = dp(10);
-        temp.addView(chart, clp);
-
-        tLegend = text("", 0xFF9AA5AB, 11, false);
-        tLegend.setText(Html.fromHtml("<font color='#4CD08A'>&#9679; Suhu di bawah 40 &deg;C</font> &nbsp; <font color='#FF5A5A'>&#9679; 40 &deg;C ke atas</font> &nbsp; <font color='#4DA3FF'>&#9679; Baterai (%)</font>", Html.FROM_HTML_MODE_LEGACY));
-        tLegend.setPadding(0, dp(6), 0, 0);
-        temp.addView(tLegend);
-        TextView tap = text("Sentuh dan geser jari di grafik untuk detail.", 0xFF59646A, 11, false);
-        tap.setPadding(0, dp(2), 0, 0);
-        temp.addView(tap);
-
-        tTrend = text("", 0xFFFFFFFF, 13, true);
-        tTrend.setPadding(0, dp(12), 0, 0);
-        temp.addView(tTrend);
-
-        tStats = text("", 0xFFDDE3E7, 12, false);
-        tStats.setPadding(0, dp(8), 0, 0);
-        temp.addView(tStats);
-
-        TextView riseTitle = text("Kenaikan suhu (naik 0,5 °C atau lebih)", 0xFFFFFFFF, 13, true);
-        riseTitle.setPadding(0, dp(12), 0, 0);
-        temp.addView(riseTitle);
-        tRises = text("", 0xFFB8C4CA, 12, false);
-        tRises.setPadding(0, dp(4), 0, 0);
-        temp.addView(tRises);
-
-        temp.addView(btn("Hapus riwayat suhu", v ->
-            new AlertDialog.Builder(this)
-                .setMessage("Hapus semua riwayat suhu baterai?")
-                .setPositiveButton("Hapus", (d, w) -> { TempLog.clear(this); loadTemp(); })
-                .setNegativeButton("Batal", null)
-                .show()));
-        TextView tn = text("Dicatat otomatis selama Mode Otomatis aktif (setiap suhu berubah 0,1 °C atau baterai berubah 1%), disimpan di HP selama 7 hari. Suhu dari sensor baterai, bisa berbeda dari suhu prosesor.", 0xff8a979d, 11, false);
-        tn.setPadding(0, dp(10), 0, 0);
-        temp.addView(tn);
-        root.addView(temp);
-
-        // Kartu kesehatan baterai (hanya di dalam aplikasi)
-        LinearLayout health = card();
-        health.addView(text("KESEHATAN BATERAI", 0xff9aa5ab, 11, true));
-        hStatus = kv(health, "Status sistem");
-        hTemp = kv(health, "Suhu");
-        hVolt = kv(health, "Tegangan");
-        hTech = kv(health, "Teknologi");
-        hCycle = kv(health, "Siklus pengisian");
-        hDesign = kv(health, "Kapasitas desain");
-        hCap = kv(health, "Estimasi kapasitas saat ini");
-        hHealth = kv(health, "Estimasi kesehatan");
-        hHint = text("", 0xff8a979d, 11, false);
-        hHint.setPadding(0, dp(10), 0, 0);
-        health.addView(hHint);
-        root.addView(health);
-
-        TextView foot = text("Android hanya melaporkan level baterai bulat. Desimal dihitung dari charge counter asli baterai dan diberi label estimasi. Tekan lama layar pengisian untuk menutupnya. Pengaturan dan riwayat tersimpan di HP dan tidak hilang saat aplikasi diperbarui, selama aplikasinya tidak dihapus.", 0xff59646a, 11, false);
-        foot.setPadding(dp(4), dp(10), dp(4), 0);
-        root.addView(foot);
-
-        setContentView(sv);
     }
 
     @Override protected void onResume() { super.onResume(); handler.post(ticker); }
@@ -374,7 +492,7 @@ public class MainActivity extends Activity {
             + "<b>5. Cek</b><br>"
             + "Kembali ke aplikasi ini: <b>Izin ubah DNS</b> harus <b>Aktif</b>.<br><br>"
             + "<b>6. Pakai</b><br>"
-            + "Isi hostname DNS, nyalakan <b>Tampilkan bubble DNS</b>. Ketuk bubble: ON = DNS pribadi, ketuk lagi = Otomatis.<br><br>"
+            + "Isi hostname DNS, nyalakan <b>Bubble DNS</b>. Ketuk bubble: ON = DNS pribadi, ketuk lagi = Otomatis.<br><br>"
             + "<b>Catatan</b><br>"
             + "&#8226; Setelah izin masuk, aShell You, Wi-Fi, dan debugging boleh dimatikan.<br>"
             + "&#8226; Error \"user 10xxx\" berarti aShell You masih di Basic shell: ulangi Pair dan Start.<br>"
@@ -402,11 +520,11 @@ public class MainActivity extends Activity {
         toggle.setChecked(on);
         toggle.setOnCheckedChangeListener(toggleListener);
         int c = on ? GREEN : RED;
-        statusCard.setBackground(box(on ? 0xFF0E2417 : 0xFF2A1210, c, 14));
+        statusCard.setBackground(box(on ? 0xFF0E2417 : 0xFF2A1210, c, 18));
         statusTitle.setText(on ? "AKTIF" : "MATI");
         statusTitle.setTextColor(c);
         statusSub.setText(on ? "Layanan berjalan" : (prefs.getBoolean("auto", true)
-            ? "Layanan tidak berjalan (HP restart?). Nyalakan dengan tombol." : "Dimatikan oleh Anda"));
+            ? "Layanan tidak berjalan (HP restart?). Nyalakan dengan saklar." : "Dimatikan oleh Anda"));
 
         boolean n = Build.VERSION.SDK_INT < 33
             || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
@@ -419,6 +537,21 @@ public class MainActivity extends Activity {
         refreshQuota();
         refreshTemp();
         refreshHealth();
+        refreshTabs(on);
+    }
+
+    private CharSequence tabLabel(String label, int dot) {
+        SpannableStringBuilder sb = new SpannableStringBuilder("● ");
+        sb.setSpan(new ForegroundColorSpan(dot), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.append(label);
+        return sb;
+    }
+
+    private void refreshTabs(boolean decimalOn) {
+        tabDecimal.setText(tabLabel("Decimal", decimalOn ? GREEN : RED));
+        String m = DnsHelper.mode(this);
+        int dd = "hostname".equals(m) ? GREEN : (DnsBubbleService.running ? B_BLUE : GRAY);
+        tabDns.setText(tabLabel("DNS", dd));
     }
 
     private void refreshDns() {
@@ -427,15 +560,22 @@ public class MainActivity extends Activity {
         bubbleSwitch.setOnCheckedChangeListener(bubbleListener);
         String m = DnsHelper.mode(this);
         String s;
+        int col;
         if ("hostname".equals(m)) {
             String sp = DnsHelper.spec(this);
-            s = "Mode DNS saat ini: Pribadi" + (sp.isEmpty() ? "" : " (" + sp + ")");
+            s = "Pribadi" + (sp.isEmpty() ? "" : " · " + sp);
+            col = GREEN;
         } else if ("off".equals(m)) {
-            s = "Mode DNS saat ini: Mati";
+            s = "Mati";
+            col = GRAY;
         } else {
-            s = "Mode DNS saat ini: Otomatis";
+            s = "Otomatis";
+            col = B_BLUE;
         }
         dnsMode.setText(s);
+        dnsMode.setTextColor(col);
+        dnsSub.setText(DnsBubbleService.running ? "Bubble tampil di layar" : "Bubble mati");
+        dnsHero.setBackground(box(0xFF101316, col, 18));
         state(rowDns, DnsHelper.canWrite(this));
     }
 
@@ -453,35 +593,51 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String f1(double v) { return String.format(new Locale("id", "ID"), "%.1f", v); }
+    private String f1(double v) { return String.format(idl, "%.1f", v); }
+
+    private int batCol(boolean chg, double pct) {
+        return chg ? B_GREEN : (pct < 20.0 ? B_ORANGE : B_BLUE);
+    }
 
     private void styleTabs() {
         for (int k = 0; k < 4; k++) {
             boolean sel = k == period;
-            periodBtns[k].setBackground(sel ? box(0xFF2B4A6F, 0xFF4DA3FF, 10) : box(0xFF1B2227, 0xFF2C353C, 10));
+            periodBtns[k].setBackground(sel ? box(0xFF1C3350, 0xFF3D8BFF, 10) : box(0xFF1B2227, 0xFF2C353C, 10));
             periodBtns[k].setTextColor(sel ? 0xFFFFFFFF : 0xFF9AA5AB);
         }
     }
 
     private void refreshTemp() {
         try {
+            BatteryReader r = BatteryReader.read(this);
             Intent bi = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-            if (bi != null) {
-                int tm = bi.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
-                int lv = bi.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
-                int sc = bi.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
-                String a = tm == Integer.MIN_VALUE ? "-" : f1(tm / 10.0) + " °C";
-                String bt = (lv >= 0 && sc > 0) ? Math.round(100f * lv / sc) + "%" : "-";
-                tTemp.setText(a + "   " + bt);
-                double tv = tm == Integer.MIN_VALUE ? 0 : tm / 10.0;
-                tTemp.setTextColor(tv >= 40.0 ? RED : GREEN);
-            }
+            int tm = bi == null ? Integer.MIN_VALUE : bi.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+            double tv = tm == Integer.MIN_VALUE ? 0 : tm / 10.0;
+            String ts = tm == Integer.MIN_VALUE ? "-" : f1(tv) + " °C";
+            double pct = r.whole < 0 ? -1 : r.whole + (r.hundredths >= 0 ? r.hundredths / 100.0 : 0);
+            String bt = r.whole < 0 ? "-" : (r.hundredths >= 0
+                ? String.format(idl, "%d,%d%%", r.whole, r.hundredths / 10) : r.whole + "%");
+            SpannableStringBuilder sb = new SpannableStringBuilder();
+            int s0 = sb.length();
+            sb.append(ts);
+            sb.setSpan(new ForegroundColorSpan(tv >= 45.0 ? FIRE : ICE), s0, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.append("   ");
+            s0 = sb.length();
+            sb.append(bt);
+            sb.setSpan(new ForegroundColorSpan(batCol(r.charging, pct)), s0, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            tTemp.setText(sb);
         } catch (Throwable ignored) { }
-        loadTemp();
+        loadTemp(false);
     }
 
-    private void loadTemp() {
+    private void loadTemp(boolean force) {
         long now = System.currentTimeMillis();
+        int rev = TempLog.rev;
+        if (!force && rev == lastRev && period == lastPeriod && now - lastLoad < 15000) return;
+        lastRev = rev;
+        lastPeriod = period;
+        lastLoad = now;
+
         long from = now - SPANS[period];
         List<TempLog.Sample> list = TempLog.load(this, from);
         chart.setData(list, from, now);
@@ -501,7 +657,7 @@ public class MainActivity extends Activity {
             if (Double.isNaN(base)) { base = v; continue; }
             if (v >= base + 0.5) {
                 ev.add(tf.format(new Date(s.t)) + "   naik ke " + f1(v) + " °C (+" + f1(v - base)
-                    + ")   baterai " + s.level + "%" + (s.chg ? "   mengisi" : ""));
+                    + ")   baterai " + TempLog.pct(s.level10) + (s.chg ? "   mengisi" : ""));
                 base = v;
             } else if (v <= base - 0.5) {
                 base = v;
@@ -509,7 +665,7 @@ public class MainActivity extends Activity {
         }
         if (cnt == 0 || smx == null || smn == null) {
             tTrend.setText("Tren: belum ada data");
-            tStats.setText("Belum ada data. Pastikan Mode Otomatis aktif, lalu tunggu beberapa menit.");
+            tStats.setText("Belum ada data. Pastikan Layar Decimal aktif, lalu tunggu beberapa menit.");
             tRises.setText("-");
             return;
         }
@@ -521,14 +677,14 @@ public class MainActivity extends Activity {
         }
         long mins = Math.max(0L, (lastS.t - refS.t) / 60000L);
         double dT = (lastS.temp - refS.temp) / 10.0;
-        int dL = lastS.level - refS.level;
-        String ts = Math.abs(dT) < 0.05 ? "stabil" : ((dT > 0 ? "naik " : "turun ") + f1(Math.abs(dT)) + " °C");
-        String bs = dL == 0 ? "tetap" : ((dL > 0 ? "naik " : "turun ") + Math.abs(dL) + "%");
+        int dL = lastS.level10 - refS.level10;
+        String tsr = Math.abs(dT) < 0.05 ? "stabil" : ((dT > 0 ? "naik " : "turun ") + f1(Math.abs(dT)) + " °C");
+        String bsr = dL == 0 ? "tetap" : ((dL > 0 ? "naik " : "turun ") + f1(Math.abs(dL) / 10.0) + "%");
         tTrend.setText(mins < 1 ? "Tren: data masih sedikit"
-            : "Tren " + mins + " menit terakhir: suhu " + ts + ", baterai " + bs);
+            : "Tren " + mins + " menit terakhir: suhu " + tsr + ", baterai " + bsr);
 
-        tStats.setText("Tertinggi " + f1(mx) + " °C (" + tf.format(new Date(smx.t)) + ", baterai " + smx.level + "%)\n"
-            + "Terendah " + f1(mn) + " °C (" + tf.format(new Date(smn.t)) + ", baterai " + smn.level + "%)\n"
+        tStats.setText("Tertinggi " + f1(mx) + " °C (" + tf.format(new Date(smx.t)) + ", baterai " + TempLog.pct(smx.level10) + ")\n"
+            + "Terendah " + f1(mn) + " °C (" + tf.format(new Date(smn.t)) + ", baterai " + TempLog.pct(smn.level10) + ")\n"
             + "Rata-rata " + f1(sum / cnt) + " °C dari " + cnt + " catatan");
         if (ev.isEmpty()) {
             tRises.setText("Belum ada kenaikan 0,5 °C atau lebih pada periode ini.");
@@ -576,9 +732,9 @@ public class MainActivity extends Activity {
                 hStatus.setText(s); hStatus.setTextColor(col);
                 int tm = bi.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
                 hTemp.setText(tm == Integer.MIN_VALUE ? "Tidak tersedia"
-                    : String.format(new Locale("id", "ID"), "%.1f °C", tm / 10.0));
+                    : String.format(idl, "%.1f °C", tm / 10.0));
                 int mv = bi.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
-                hVolt.setText(mv > 0 ? String.format(new Locale("id", "ID"), "%.2f V", mv / 1000.0) : "Tidak tersedia");
+                hVolt.setText(mv > 0 ? String.format(idl, "%.2f V", mv / 1000.0) : "Tidak tersedia");
                 String tech = bi.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY);
                 hTech.setText(tech == null || tech.isEmpty() ? "Tidak tersedia" : tech);
 
@@ -685,8 +841,8 @@ public class MainActivity extends Activity {
     private LinearLayout card() {
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.setPadding(dp(16), dp(14), dp(16), dp(14));
-        l.setBackground(box(0xFF101316, 0xFF20272C, 14));
+        l.setPadding(dp(18), dp(16), dp(18), dp(16));
+        l.setBackground(box(0xFF101316, 0xFF1C2227, 18));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.bottomMargin = dp(12);
@@ -697,7 +853,7 @@ public class MainActivity extends Activity {
     private Button btn(String s, View.OnClickListener l) {
         Button b = new Button(this);
         b.setText(s); b.setAllCaps(false); b.setTextColor(0xFFFFFFFF);
-        b.setBackground(box(0xFF1B2227, 0xFF2C353C, 10));
+        b.setBackground(box(0xFF1B2227, 0xFF2C353C, 12));
         b.setOnClickListener(l);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
@@ -736,4 +892,4 @@ public class MainActivity extends Activity {
         chip(r.chip, ok ? "Aktif" : "Belum", ok ? GREEN : RED);
         r.btn.setVisibility(ok ? View.GONE : View.VISIBLE);
     }
-        }
+    }
