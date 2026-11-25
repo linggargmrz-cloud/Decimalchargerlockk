@@ -13,26 +13,24 @@ public class App extends Application {
     private final Handler h = new Handler(Looper.getMainLooper());
 
     private final BroadcastReceiver rx = new BroadcastReceiver() {
-        @Override public void onReceive(Context c, Intent i) { log(c, i); }
+        @Override public void onReceive(Context c, Intent i) { tick(c); }
     };
 
+    // Mengecek tiap 15 detik saat dicas (untuk desimal 0,1%), tiap 30 detik saat tidak dicas.
     private final Runnable poll = new Runnable() {
         @Override public void run() {
+            tick(App.this);
+            long next = 30000;
             try {
-                log(App.this, registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED)));
+                Intent i = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+                if (i != null && i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0) next = 15000;
             } catch (Throwable ignored) { }
-            h.postDelayed(this, 30000);
+            h.postDelayed(this, next);
         }
     };
 
-    static void log(Context c, Intent i) {
-        if (i == null) return;
-        int level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
-        int scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
-        int temp = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
-        boolean chg = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
-        if (level < 0 || scale <= 0) return;
-        TempLog.record(c, Math.round(100f * level / scale), temp, chg);
+    static void tick(Context c) {
+        try { BatteryReader.read(c); } catch (Throwable ignored) { }
     }
 
     @Override public void onCreate() {
