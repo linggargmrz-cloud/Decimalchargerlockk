@@ -21,8 +21,10 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.Editable;
+import android.text.Html;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.text.method.LinkMovementMethod;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -172,6 +174,7 @@ public class MainActivity extends Activity {
         TextView hintDns = text("Ketuk bubble: ON = DNS pribadi (hostname di atas), ketuk lagi = DNS Otomatis. Geser untuk memindahkan.", 0xff8a979d, 12, false);
         hintDns.setPadding(0, dp(6), 0, 0);
         dns.addView(hintDns);
+        dns.addView(btn("Panduan memasang izin DNS (lengkap)", v -> showDnsGuide()));
 
         bubbleListener = (v, on) -> {
             if (on) {
@@ -187,7 +190,7 @@ public class MainActivity extends Activity {
             handler.postDelayed(this::refresh, 600);
         };
 
-        rowDns = row(dns, "Izin ubah DNS", "Diberikan sekali lewat ADB. Salin perintahnya, lalu jalankan lewat Shizuku, LADB, atau komputer.", "Salin perintah ADB", v -> copyAdb());
+        rowDns = row(dns, "Izin ubah DNS", "Diberikan sekali lewat ADB. Ikuti panduan di atas, atau salin perintahnya.", "Salin perintah ADB", v -> copyAdb());
         root.addView(dns);
 
         // Kartu kesehatan baterai (hanya di dalam aplikasi)
@@ -215,6 +218,47 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() { super.onResume(); handler.post(ticker); }
     @Override protected void onPause() { handler.removeCallbacks(ticker); super.onPause(); }
+
+    private void showDnsGuide() {
+        String html =
+            "<b>Syarat:</b> Android 11 ke atas dan HP tersambung Wi-Fi.<br><br>"
+            + "<b>1. Pasang aShell You (gratis)</b><br>"
+            + "F-Droid: <a href=\"https://f-droid.org/en/packages/in.hridayan.ashell/\">f-droid.org/en/packages/in.hridayan.ashell</a><br>"
+            + "GitHub: <a href=\"https://github.com/DP-Hridayan/aShellYou\">github.com/DP-Hridayan/aShellYou</a><br>"
+            + "Situs: <a href=\"https://ashellyou.github.io/\">ashellyou.github.io</a><br>"
+            + "Pastikan namanya <b>aShell You</b> (pembuat DP Hridayan).<br><br>"
+            + "<b>2. Nyalakan Opsi pengembang</b><br>"
+            + "Pengaturan > Tentang ponsel > ketuk <b>Versi MIUI</b> 7 kali. Lalu buka Pengaturan tambahan > Opsi pengembang dan nyalakan <b>Debugging USB</b>, <b>Debugging USB (setelan Keamanan)</b> (bisa meminta akun Mi dan SIM), dan <b>Debugging nirkabel</b>.<br><br>"
+            + "<b>3. Pairing di aShell You</b><br>"
+            + "Buka aShell You > kartu <b>ADB via Wireless Debugging</b> > <b>This Device</b> > <b>Pair</b>. Di Opsi pengembang > Debugging nirkabel, ketuk <b>Pasangkan perangkat dengan kode penyambungan</b>. Ketik kode 6 digit di notifikasi aShell You. Kembali ke aShell You, ketuk <b>Start</b> sampai tersambung (bukan \"Basic shell\").<br><br>"
+            + "<b>4. Jalankan perintah</b><br>"
+            + "Di terminal aShell You, ketik lalu kirim (tombol di bawah menyalinnya):<br>"
+            + "<tt>pm grant id.decimalcharge.lock android.permission.WRITE_SECURE_SETTINGS</tt><br>"
+            + "Berhasil jika tidak ada teks error.<br><br>"
+            + "<b>5. Cek</b><br>"
+            + "Kembali ke aplikasi ini: <b>Izin ubah DNS</b> harus <b>Aktif</b>.<br><br>"
+            + "<b>6. Pakai</b><br>"
+            + "Isi hostname DNS, nyalakan <b>Tampilkan bubble DNS</b>. Ketuk bubble: ON = DNS pribadi, ketuk lagi = Otomatis.<br><br>"
+            + "<b>Catatan</b><br>"
+            + "&#8226; Setelah izin masuk, aShell You, Wi-Fi, dan debugging boleh dimatikan.<br>"
+            + "&#8226; Error \"user 10xxx\" berarti aShell You masih di Basic shell: ulangi Pair dan Start.<br>"
+            + "&#8226; Izin hilang jika aplikasi ini dihapus lalu dipasang ulang.";
+        TextView tv = new TextView(this);
+        tv.setText(Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY));
+        tv.setMovementMethod(LinkMovementMethod.getInstance());
+        tv.setTextColor(0xFFDDE3E7);
+        tv.setLinkTextColor(0xFF6FB1FF);
+        tv.setTextSize(14);
+        tv.setPadding(dp(20), dp(12), dp(20), dp(4));
+        ScrollView gsv = new ScrollView(this);
+        gsv.addView(tv);
+        new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Panduan memasang izin DNS")
+            .setView(gsv)
+            .setPositiveButton("Salin perintah ADB", (d, w) -> copyAdb())
+            .setNegativeButton("Tutup", null)
+            .show();
+    }
 
     private void refresh() {
         boolean on = running();
@@ -441,4 +485,4 @@ public class MainActivity extends Activity {
         chip(r.chip, ok ? "Aktif" : "Belum", ok ? GREEN : RED);
         r.btn.setVisibility(ok ? View.GONE : View.VISIBLE);
     }
-                }
+            }
