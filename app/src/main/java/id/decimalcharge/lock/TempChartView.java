@@ -26,6 +26,12 @@ public class TempChartView extends View {
     private static final int B_GREEN = 0xFF3DDC84, B_ORANGE = 0xFFFFA726, B_BLUE = 0xFF3D8BFF;
     private static final double LIMIT = 45.0, CUT = 44.95;
 
+    private static final class Run {
+        long a, b;
+        int level10;
+        boolean chg;
+    }
+
     private List<TempLog.Sample> data = new ArrayList<>();
     private long reqFrom = 0, reqTo = 1, t0 = 0, t1 = 1;
     private float touchX = -1, downX, downY;
@@ -65,7 +71,7 @@ public class TempChartView extends View {
         lineP.setStrokeJoin(Paint.Join.ROUND);
         lineP.setStrokeCap(Paint.Cap.ROUND);
         batP.setStyle(Paint.Style.STROKE);
-        batP.setStrokeWidth(dp(1.6f));
+        batP.setStrokeWidth(dp(1.8f));
         batP.setStrokeCap(Paint.Cap.ROUND);
         fillP.setStyle(Paint.Style.FILL);
         dotP.setStyle(Paint.Style.FILL);
@@ -135,32 +141,54 @@ public class TempChartView extends View {
         return p;
     }
 
+    // Garis baterai diperhalus: titik dengan nilai sama dikelompokkan, lalu garis ditarik
+    // dari tengah satu kelompok ke tengah kelompok berikutnya.
     private void drawBattery(Canvas cv, float[] end) {
-        TempLog.Sample prev = null;
-        float px = 0, py = 0;
         end[0] = -1;
         end[1] = -1;
+        List<Run> runs = new ArrayList<>();
+        Run cur = null;
+        long lastT = 0;
         for (TempLog.Sample s : data) {
             if (s.t < t0 || s.t > t1) continue;
-            float x = xOf(s.t), y = yB(s.level10 / 10.0);
-            if (prev != null && s.t - prev.t <= GAP_MS) {
-                batP.setColor(batColor(s));
-                cv.drawLine(px, py, x, y, batP);
+            if (cur != null && s.level10 == cur.level10 && s.chg == cur.chg && s.t - lastT <= GAP_MS) {
+                cur.b = s.t;
+            } else {
+                cur = new Run();
+                cur.a = s.t;
+                cur.b = s.t;
+                cur.level10 = s.level10;
+                cur.chg = s.chg;
+                runs.add(cur);
             }
-            prev = s;
-            px = x;
-            py = y;
+            lastT = s.t;
         }
-        if (prev != null) {
-            if (t1 > prev.t && t1 - prev.t <= GAP_MS) {
-                batP.setColor(batColor(prev));
-                float ex = xOf(t1);
-                cv.drawLine(px, py, ex, py, batP);
-                px = ex;
+        int n = runs.size();
+        if (n == 0) return;
+        float lastXm = 0, lastTail = 0, lastY = 0;
+        for (int i = 0; i < n; i++) {
+            Run r = runs.get(i);
+            float y = yB(r.level10 / 10.0);
+            float xa = xOf(r.a), xb = xOf(r.b), xm = (xa + xb) / 2f;
+            batP.setColor(r.chg ? B_GREEN : (r.level10 < 200 ? B_ORANGE : B_BLUE));
+            boolean linkPrev = i > 0 && r.a - runs.get(i - 1).b <= GAP_MS;
+            boolean linkNext = i < n - 1 && runs.get(i + 1).a - r.b <= GAP_MS;
+            if (!linkPrev && xm > xa) cv.drawLine(xa, y, xm, y, batP);
+            if (linkPrev) {
+                Run p = runs.get(i - 1);
+                float py = yB(p.level10 / 10.0);
+                float pxm = (xOf(p.a) + xOf(p.b)) / 2f;
+                cv.drawLine(pxm, py, xm, y, batP);
             }
-            end[0] = px;
-            end[1] = py;
+            float tailEnd = xb;
+            if (i == n - 1 && t1 > r.b && t1 - r.b <= GAP_MS) tailEnd = xOf(t1);
+            if (!linkNext && tailEnd > xm) cv.drawLine(xm, y, tailEnd, y, batP);
+            lastXm = xm;
+            lastTail = tailEnd;
+            lastY = y;
         }
+        end[0] = Math.max(lastXm, lastTail);
+        end[1] = lastY;
     }
 
     @Override protected void onDraw(Canvas cv) {
@@ -278,7 +306,7 @@ public class TempChartView extends View {
             cv.drawText("45 °C", w - pr - dp(4), y - dp(4), txt);
         }
 
-        // Baterai (warna menurut kondisi)
+        // Baterai (garis diperhalus, warna menurut kondisi)
         float[] eb = new float[2];
         drawBattery(cv, eb);
 
@@ -323,7 +351,16 @@ public class TempChartView extends View {
             }
         }
 
-        // Sentuhan: jam, suhu, persen baterai (0,1%)
+        // Keterangan kecil bahwa garis baterai diperhalus
+        if (touchX < 0) {
+            txt.setTextAlign(Paint.Align.LEFT);
+            txt.setTextSize(dp(10));
+            txt.setColor(0xFF59646A);
+            cv.drawText("garis baterai diperhalus", pl, dp(22), txt);
+            txt.setTextSize(dp(11));
+        }
+
+        // Sentuhan: jam, suhu, persen baterai (angka asli yang tercatat)
         if (touchX >= 0) {
             TempLog.Sample near = null;
             float nx = 0, best = 1e9f;
@@ -383,4 +420,4 @@ public class TempChartView extends View {
                 return true;
         }
     }
-            }
+                }
