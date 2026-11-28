@@ -18,5 +18,9 @@ public class BootReceiver extends BroadcastReceiver {
         if (sp.getBoolean("bubble", false) && Settings.canDrawOverlays(c)) {
             try { c.startForegroundService(new Intent(c, DnsBubbleService.class)); } catch (Exception ignored) { }
         }
+        SharedPreferences rot = c.getSharedPreferences("rot", Context.MODE_PRIVATE);
+        if ((rot.getBoolean("on", false) || rot.getBoolean("bubble", false)) && Settings.canDrawOverlays(c)) {
+            try { c.startForegroundService(new Intent(c, RotationService.class)); } catch (Exception ignored) { }
+        }
     }
 }

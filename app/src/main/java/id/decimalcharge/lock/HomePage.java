@@ -24,13 +24,13 @@ import static id.decimalcharge.lock.Ui.*;
 
 /** Halaman Beranda: dua ruang yang bisa digeser, Decimal dan DNS. */
 class HomePage extends Page {
-    TwoPager pager;
+    RoomPager pager;
     TempChartView chartHome;
     final TextView[] pHome = new TextView[4];
 
     private FrameLayout tabs;
     private View indicator;
-    private TextView tabDecimal, tabDns;
+    private final TextView[] tabViews = new TextView[4];
 
     // Ruang Decimal
     private LinearLayout statusCard;
@@ -66,16 +66,17 @@ class HomePage extends Page {
         tabs.addView(indicator, ilp);
         LinearLayout tabRow = new LinearLayout(a);
         tabRow.setOrientation(LinearLayout.HORIZONTAL);
-        tabDecimal = tab("Decimal", 0);
-        tabDns = tab("DNS", 1);
-        tabRow.addView(tabDecimal, lpw(0, MATCH, 1f));
-        tabRow.addView(tabDns, lpw(0, MATCH, 1f));
+        String[] tabNames = {"Decimal", "DNS", "Rotasi", "Klik"};
+        for (int i = 0; i < 4; i++) {
+            tabViews[i] = tab(tabNames[i], i);
+            tabRow.addView(tabViews[i], lpw(0, MATCH, 1f));
+        }
         tabs.addView(tabRow, new FrameLayout.LayoutParams(MATCH, MATCH));
         LinearLayout.LayoutParams tlp = lp(MATCH, dp(48));
         tlp.setMargins(dp(18), dp(4), dp(18), dp(10));
         col.addView(tabs, tlp);
 
-        pager = new TwoPager(a);
+        pager = new RoomPager(a);
         ScrollView sv0 = pageScroll();
         LinearLayout c0 = column();
         sv0.addView(c0);
@@ -84,40 +85,41 @@ class HomePage extends Page {
         sv1.addView(c1);
         pager.addView(sv0, new FrameLayout.LayoutParams(MATCH, MATCH));
         pager.addView(sv1, new FrameLayout.LayoutParams(MATCH, MATCH));
+        pager.addView(a.rotation.build(), new FrameLayout.LayoutParams(MATCH, MATCH));
+        pager.addView(a.clicker.build(), new FrameLayout.LayoutParams(MATCH, MATCH));
         col.addView(pager, lpw(MATCH, 0, 1f));
 
         buildDecimalRoom(c0);
         buildDnsRoom(c1);
 
-        pager.setListener(new TwoPager.Listener() {
+        pager.setListener(new RoomPager.Listener() {
             @Override public void onScroll(float pos) { updateIndicator(pos); }
             @Override public void onSelected(int page) { a.prefs.edit().putInt("page", page).apply(); }
         });
         tabs.addOnLayoutChangeListener((v, l, tp, r, bt, ol, ot, orr, ob) -> updateIndicator(pager.getPos()));
-        pager.setPage(a.prefs.getInt("page", 0) == 1 ? 1 : 0, false);
+        pager.setPage(Math.max(0, Math.min(3, a.prefs.getInt("page", 0))), false);
         return col;
     }
 
     private TextView tab(String label, final int idx) {
-        TextView t = text(label, TXT3, 14, true);
+        TextView t = text(label, TXT3, 13, true);
         t.setGravity(Gravity.CENTER);
         t.setOnClickListener(v -> pager.setPage(idx, true));
         return t;
     }
 
     private void updateIndicator(float pos) {
-        if (tabs == null || indicator == null || tabDecimal == null) return;
+        if (tabs == null || indicator == null || tabViews[3] == null) return;
         int w = tabs.getWidth();
         if (w <= 0) return;
-        int iw = (w - dp(8)) / 2;
+        int iw = (w - dp(8)) / 4;
         FrameLayout.LayoutParams l = (FrameLayout.LayoutParams) indicator.getLayoutParams();
         if (l.width != iw) {
             l.width = iw;
             indicator.setLayoutParams(l);
         }
         indicator.setTranslationX(dp(4) + pos * iw);
-        tabDecimal.setTextColor(pos < 0.5f ? TXT : TXT3);
-        tabDns.setTextColor(pos >= 0.5f ? TXT : TXT3);
+        for (int i = 0; i < 4; i++) tabViews[i].setTextColor(Math.abs(pos - i) < 0.5f ? TXT : TXT3);
     }
 
     // ===================== RUANG DECIMAL =====================
@@ -417,10 +419,15 @@ class HomePage extends Page {
     }
 
     private void refreshTabs(boolean decimalOn) {
-        tabDecimal.setText(tabLabel("Decimal", decimalOn ? GREEN : RED));
+        tabViews[0].setText(tabLabel("Decimal", decimalOn ? GREEN : RED));
         String m = DnsHelper.mode(a);
         int dd = "hostname".equals(m) ? GREEN : (DnsBubbleService.running ? B_BLUE : GRAY);
-        tabDns.setText(tabLabel("DNS", dd));
+        tabViews[1].setText(tabLabel("DNS", dd));
+        int rd = RotationService.current(a) != RotationService.OFF ? GREEN : GRAY;
+        tabViews[2].setText(tabLabel("Rotasi", rd));
+        int cd = ClickerService.instance == null ? GRAY
+            : (ClickerService.state == ClickerService.RUNNING ? GREEN : B_BLUE);
+        tabViews[3].setText(tabLabel("Klik", cd));
     }
 
     private void refreshDns() {

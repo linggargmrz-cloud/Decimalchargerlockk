@@ -10,7 +10,9 @@ import android.view.View;
 /** Ikon garis sederhana yang digambar sendiri (tanpa file gambar). */
 public class IconView extends View {
     static final int HOME = 0, CHART = 1, GEAR = 2, INFO = 3, SHIELD = 4, BATTERY = 5, THERMO = 6,
-        BELL = 7, GLOBE = 8, TERMINAL = 9, DOC = 10, CLOCK = 11, CHECK = 12, ARROW = 13;
+        BELL = 7, GLOBE = 8, TERMINAL = 9, DOC = 10, CLOCK = 11, CHECK = 12, ARROW = 13,
+        PLAY = 14, PAUSE = 15, STOP = 16, PLUS = 17, MINUS = 18, TOUCH = 19, ROTATE = 20,
+        LOCK = 21, CLOSE = 22, GRIP = 23, EDIT = 24, PHONE = 25;
 
     private final int type;
     private int color;
@@ -181,6 +183,83 @@ public class IconView extends View {
                 path.lineTo(16, 12);
                 path.lineTo(9, 19);
                 cv.drawPath(path, p);
+                break;
+            case PLAY:
+                path.moveTo(8, 5);
+                path.lineTo(19, 12);
+                path.lineTo(8, 19);
+                path.close();
+                p.setStyle(Paint.Style.FILL);
+                cv.drawPath(path, p);
+                break;
+            case PAUSE:
+                p.setStyle(Paint.Style.FILL);
+                r.set(7, 5, 10.5f, 19);
+                cv.drawRoundRect(r, 1.2f, 1.2f, p);
+                r.set(13.5f, 5, 17, 19);
+                cv.drawRoundRect(r, 1.2f, 1.2f, p);
+                break;
+            case STOP:
+                p.setStyle(Paint.Style.FILL);
+                r.set(6, 6, 18, 18);
+                cv.drawRoundRect(r, 2f, 2f, p);
+                break;
+            case PLUS:
+                cv.drawLine(12, 5, 12, 19, p);
+                cv.drawLine(5, 12, 19, 12, p);
+                break;
+            case MINUS:
+                cv.drawLine(5, 12, 19, 12, p);
+                break;
+            case TOUCH:
+                cv.drawCircle(12, 12, 8.5f, p);
+                p.setStyle(Paint.Style.FILL);
+                cv.drawCircle(12, 12, 3f, p);
+                break;
+            case ROTATE:
+                r.set(5, 5, 19, 19);
+                cv.drawArc(r, 40, 260, false, p);
+                path.moveTo(18.1f, 7.4f);
+                path.lineTo(16.6f, 4.0f);
+                path.lineTo(14.4f, 7.8f);
+                path.close();
+                p.setStyle(Paint.Style.FILL);
+                cv.drawPath(path, p);
+                break;
+            case LOCK:
+                r.set(6, 11, 18, 21);
+                cv.drawRoundRect(r, 2.5f, 2.5f, p);
+                r.set(8.5f, 4.5f, 15.5f, 11.5f);
+                cv.drawArc(r, 180, 180, false, p);
+                cv.drawLine(8.5f, 8, 8.5f, 11, p);
+                cv.drawLine(15.5f, 8, 15.5f, 11, p);
+                break;
+            case CLOSE:
+                cv.drawLine(6, 6, 18, 18, p);
+                cv.drawLine(18, 6, 6, 18, p);
+                break;
+            case GRIP:
+                p.setStyle(Paint.Style.FILL);
+                cv.drawCircle(9, 7, 1.4f, p);
+                cv.drawCircle(15, 7, 1.4f, p);
+                cv.drawCircle(9, 12, 1.4f, p);
+                cv.drawCircle(15, 12, 1.4f, p);
+                cv.drawCircle(9, 17, 1.4f, p);
+                cv.drawCircle(15, 17, 1.4f, p);
+                break;
+            case EDIT:
+                path.moveTo(4, 20);
+                path.lineTo(5, 15);
+                path.lineTo(15.5f, 4.5f);
+                path.lineTo(19.5f, 8.5f);
+                path.lineTo(9, 19);
+                path.close();
+                cv.drawPath(path, p);
+                break;
+            case PHONE:
+                r.set(7, 2.5f, 17, 21.5f);
+                cv.drawRoundRect(r, 2.5f, 2.5f, p);
+                cv.drawLine(10.5f, 18.5f, 13.5f, 18.5f, p);
                 break;
             default:
                 break;

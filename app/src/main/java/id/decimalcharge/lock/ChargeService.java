@@ -38,7 +38,7 @@ public class ChargeService extends Service {
             PowerManager pm = getSystemService(PowerManager.class);
             KeyguardManager km = getSystemService(KeyguardManager.class);
             if (pm.isInteractive() || !isCharging()) return;
-            if (ChargeActivity.showing) return;
+            if (ChargeActivity.showing && ChargeActivity.dimMode) return;
             if (km.isKeyguardLocked() || ++tries >= 16) { launch(true); return; }
             h.postDelayed(this, 500);
         }
@@ -47,7 +47,14 @@ public class ChargeService extends Service {
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             String a = i.getAction();
+            if (Intent.ACTION_BATTERY_CHANGED.equals(a)) {
+                // Menjaga kalibrasi desimal tetap berjalan walau layar mati.
+                BatteryReader.read(c);
+                return;
+            }
             if (Intent.ACTION_POWER_CONNECTED.equals(a)) {
+                // Abaikan jika layar pengisian sudah tampil (mencegah layar terang muncul lagi).
+                if (ChargeActivity.showing) return;
                 h.removeCallbacks(waitLock);
                 if (getSystemService(PowerManager.class).isInteractive()) {
                     launch(false);
@@ -83,7 +90,7 @@ public class ChargeService extends Service {
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, CH_STATUS)
             .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
-            .setContentTitle("Decimal Charge Lock aktif")
+            .setContentTitle("L-CORE aktif")
             .setContentText("Ketuk untuk menyembunyikan notifikasi ini")
             .setOngoing(true)
             .setVisibility(Notification.VISIBILITY_SECRET)
@@ -104,6 +111,7 @@ public class ChargeService extends Service {
         f.addAction(Intent.ACTION_POWER_CONNECTED);
         f.addAction(Intent.ACTION_POWER_DISCONNECTED);
         f.addAction(Intent.ACTION_SCREEN_OFF);
+        f.addAction(Intent.ACTION_BATTERY_CHANGED);
         registerReceiver(receiver, f);
     }
 
@@ -142,4 +150,4 @@ public class ChargeService extends Service {
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }
-                    }
+}

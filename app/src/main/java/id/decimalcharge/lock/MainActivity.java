@@ -44,6 +44,8 @@ public class MainActivity extends Activity {
     HistoryPage history;
     SettingsPage settings;
     AboutPage about;
+    RotationPage rotation;
+    ClickerPage clicker;
 
     private final Runnable ticker = new Runnable() {
         @Override public void run() { refresh(); handler.postDelayed(this, 2000); }
@@ -70,6 +72,8 @@ public class MainActivity extends Activity {
         history = new HistoryPage(this);
         settings = new SettingsPage(this);
         about = new AboutPage(this);
+        rotation = new RotationPage(this);
+        clicker = new ClickerPage(this);
 
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(LinearLayout.VERTICAL);
@@ -93,7 +97,7 @@ public class MainActivity extends Activity {
 
     @Override public void onBackPressed() {
         if (nav != 0) selectNav(0);
-        else if (home.pager != null && home.pager.getPage() == 1) home.pager.setPage(0, true);
+        else if (home.pager != null && home.pager.getPage() != 0) home.pager.setPage(0, true);
         else super.onBackPressed();
     }
 
@@ -104,7 +108,7 @@ public class MainActivity extends Activity {
         try {
             PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
             long code = Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : pi.versionCode;
-            return "Versi " + pi.versionName + " (build " + code + ")";
+            return "Build " + code;
         } catch (Throwable t) {
             return "";
         }
@@ -119,8 +123,8 @@ public class MainActivity extends Activity {
         LinearLayout t = new LinearLayout(this);
         t.setOrientation(LinearLayout.VERTICAL);
         t.setPadding(ui.dp(12), 0, 0, 0);
-        t.addView(ui.text("Decimal Charge Lock", TXT, 20, true));
-        t.addView(ui.text(versionString(), TXT3, 12, false));
+        t.addView(ui.text("L-CORE", TXT, 20, true));
+        t.addView(ui.text("Multi-Tools Ecosystem", TXT3, 12, false));
         h.addView(t, ui.lpw(0, WRAP, 1f));
         IconView gear = new IconView(this, IconView.GEAR, TXT2);
         gear.setOnClickListener(v -> selectNav(2));
@@ -197,6 +201,8 @@ public class MainActivity extends Activity {
             history.setCondition(tv);
         } catch (Throwable ignored) { }
         history.refresh();
+        rotation.refresh();
+        clicker.refresh();
     }
 
     @SuppressWarnings("deprecation")
